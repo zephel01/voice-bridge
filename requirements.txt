@@ -1,0 +1,8 @@
+faster-whisper
+deep-translator
+edge-tts
+sounddevice; sys_platform != 'win32'
+PyAudioWPatch; sys_platform == 'win32'
+pygame
+numpy
+requests
