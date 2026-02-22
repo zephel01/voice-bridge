@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <!-- ヘッダー -->
+  <div class="header">
+    <h1>🌉 Voice Bridge</h1>
+    <div class="subtitle">タブの英語音声をリアルタイムで日本語に翻訳</div>
+  </div>
+
+  <!-- コントロール -->
+  <div class="controls">
+    <button id="btn-start" class="btn btn-start">▶ 開始</button>
+    <button id="btn-stop" class="btn btn-stop" disabled>■ 停止</button>
+  </div>
+
+  <div class="status">
+    <span id="status-dot" class="status-dot inactive"></span>
+    <span id="status-text">待機中</span>
+  </div>
+
+  <!-- 英語テキスト -->
+  <div class="text-section">
+    <div class="text-label">🇺🇸 English</div>
+    <div id="english-box" class="text-box english">
+      <div class="interim" id="english-interim"></div>
+    </div>
+  </div>
+
+  <!-- 日本語テキスト -->
+  <div class="text-section">
+    <div class="text-label">🇯🇵 日本語</div>
+    <div id="japanese-box" class="text-box japanese"></div>
+  </div>
+
+  <!-- 声選択（VOICEVOX検出時のみ表示） -->
+  <div id="voice-section" class="voice-section" style="display:none;">
+    <span class="setting-label">声:</span>
+    <select id="voice-select" class="voice-select"></select>
+  </div>
+
+  <!-- 遅延表示 -->
+  <div class="latency-bar">
+    <span id="latency-text">翻訳遅延: --</span>
+    <span id="offset-text">読んでる場所: --秒前</span>
+  </div>
+
+  <!-- 設定 -->
+  <div class="settings">
+    <div class="setting-row">
+      <span class="setting-label">タブ音量</span>
+      <span>
+        <input type="range" id="tab-volume" min="0" max="2.0" step="0.1" value="1.0">
+        <span class="setting-value" id="tab-volume-value">100%</span>
+      </span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">読み上げ速度</span>
+      <span>
+        <input type="range" id="tts-rate" min="0.5" max="2.0" step="0.1" value="0.9">
+        <span class="setting-value" id="tts-rate-value">0.9x</span>
+      </span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">読み上げ音量</span>
+      <span>
+        <input type="range" id="tts-volume" min="0" max="1.0" step="0.1" value="1.0">
+        <span class="setting-value" id="tts-volume-value">100%</span>
+      </span>
+    </div>
+  </div>
+
+  <!-- フッター -->
+  <div class="footer">
+    <div class="credit" id="credit-text">
+      音声認識: Web Speech API | 翻訳: Google Translate
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
