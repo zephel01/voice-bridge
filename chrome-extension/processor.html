@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>Voice Bridge - Processing</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 400px;
+      background: #1e1e2e;
+      color: #cdd6f4;
+      font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+      font-size: 13px;
+      padding: 12px;
+      min-height: 200px;
+    }
+    .header { text-align: center; margin-bottom: 10px; }
+    .header h1 { font-size: 15px; color: #89b4fa; }
+    .status {
+      font-size: 11px; color: #a6adc8;
+      margin-bottom: 8px;
+    }
+    .status-dot {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; margin-right: 6px; vertical-align: middle;
+      background: #a6e3a1; animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .log {
+      background: #313244; border-radius: 6px;
+      padding: 8px; max-height: 140px; overflow-y: auto;
+      font-size: 11px; line-height: 1.5;
+    }
+    .log .en { color: #cdd6f4; }
+    .log .ja { color: #f9e2af; }
+    .log .sys { color: #585b70; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="header"><h1>🌉 Voice Bridge - 処理中</h1></div>
+  <div class="status">
+    <span class="status-dot"></span>
+    <span id="status-text">初期化中...</span>
+  </div>
+  <div class="log" id="log"></div>
+
+  <script src="translator.js"></script>
+  <script src="processor.js"></script>
+</body>
+</html>
