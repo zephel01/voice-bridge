@@ -301,6 +301,7 @@ def run_gui(args):
     gui = VoiceBridgeGUI(
         on_start=bridge.start,
         on_stop=bridge.stop,
+        on_clear=None,
         on_model_change=bridge.change_model,
         on_device_change=bridge.change_device,
         on_voice_change=on_voice_change,

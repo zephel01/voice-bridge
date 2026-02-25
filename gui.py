@@ -12,11 +12,12 @@ import queue
 class VoiceBridgeGUI:
     """Voice Bridge の GUI"""
 
-    def __init__(self, on_start=None, on_stop=None, on_model_change=None, on_device_change=None, on_voice_change=None, on_rate_change=None):
+    def __init__(self, on_start=None, on_stop=None, on_clear=None, on_model_change=None, on_device_change=None, on_voice_change=None, on_rate_change=None):
         """
         Args:
             on_start: 開始ボタン押下時のコールバック
             on_stop: 停止ボタン押下時のコールバック
+            on_clear: クリアボタン押下時のコールバック
             on_model_change: モデル変更時のコールバック (model_size: str)
             on_device_change: デバイス変更時のコールバック (device_name: str)
             on_voice_change: 音声変更時のコールバック (voice: str)
@@ -24,6 +25,7 @@ class VoiceBridgeGUI:
         """
         self.on_start = on_start
         self.on_stop = on_stop
+        self.on_clear = on_clear
         self.on_model_change = on_model_change
         self.on_device_change = on_device_change
         self.on_voice_change = on_voice_change
@@ -111,7 +113,14 @@ class VoiceBridgeGUI:
             bg="#f38ba8", fg="#1e1e2e", font=("Helvetica", 13, "bold"),
             width=12, height=1, relief=tk.FLAT, cursor="hand2", state=tk.DISABLED
         )
-        self.stop_btn.pack(side=tk.LEFT)
+        self.stop_btn.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.clear_btn = tk.Button(
+            btn_frame, text="🗑 クリア", command=self._on_clear,
+            bg="#89b4fa", fg="#1e1e2e", font=("Helvetica", 13, "bold"),
+            width=12, height=1, relief=tk.FLAT, cursor="hand2"
+        )
+        self.clear_btn.pack(side=tk.LEFT)
 
         # ステータス
         self.status_var = tk.StringVar(value="待機中")
@@ -191,6 +200,12 @@ class VoiceBridgeGUI:
         if self.on_stop:
             self.on_stop()
 
+    def _on_clear(self):
+        self._clear_text(self.en_text)
+        self._clear_text(self.ja_text)
+        if self.on_clear:
+            self.on_clear()
+
     def _on_model_changed(self, event=None):
         if self.on_model_change:
             self.on_model_change(self.model_var.get())
@@ -236,6 +251,12 @@ class VoiceBridgeGUI:
         widget.configure(state=tk.NORMAL)
         widget.insert(tk.END, text + "\n")
         widget.see(tk.END)
+        widget.configure(state=tk.DISABLED)
+
+    def _clear_text(self, widget):
+        """テキストウィジェットをクリア"""
+        widget.configure(state=tk.NORMAL)
+        widget.delete(1.0, tk.END)
         widget.configure(state=tk.DISABLED)
 
     def _update_level(self, data):
