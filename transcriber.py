@@ -57,10 +57,11 @@ class Transcriber:
             audio = audio.astype(np.float32)
 
         # 音声認識実行
+        # 精度向上と安定性のバランスを取った設定
         segments, info = self._model.transcribe(
             audio,
             language="en",
-            beam_size=5,
+            beam_size=10,  # 改善：5 → 10 に引き上げ（5は低すぎ、15は不安定）
             vad_filter=True,  # VAD で無音区間をスキップ
             vad_parameters=dict(
                 min_silence_duration_ms=500,
