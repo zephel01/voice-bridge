@@ -96,6 +96,24 @@ class Translator:
         self.terminology.update(term_dict)
         print(f"[Translator] {len(term_dict)}個の用語を追加しました")
 
+    def _remove_duplicate_sentences(self, text: str) -> str:
+        """
+        連続する重複した文を削除
+        例: "今日は良い日です。今日は良い日です。" → "今日は良い日です。"
+        """
+        # 。で分割
+        sentences = text.split('。')
+        unique_sentences = []
+        last_sentence = ""
+
+        for sent in sentences:
+            sent = sent.strip()
+            if sent and sent != last_sentence:  # 重複していなければ追加
+                unique_sentences.append(sent)
+                last_sentence = sent
+
+        return '。'.join(unique_sentences) + ('。' if text.endswith('。') else '')
+
     def translate(self, text: str) -> str:
         """
         テキストを翻訳する（専門用語辞書対応）
@@ -121,7 +139,11 @@ class Translator:
 
                 # ステップ3: 専門用語を復元
                 final_result = self._restore_terminology(result, replacements)
-                return final_result if final_result else ""
+
+                # ステップ4: 重複した文を削除
+                cleaned_result = self._remove_duplicate_sentences(final_result)
+
+                return cleaned_result if cleaned_result else ""
 
             except Exception as e:
                 if attempt < self.max_retries - 1:

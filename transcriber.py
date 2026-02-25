@@ -56,25 +56,33 @@ class Transcriber:
         if audio.dtype != np.float32:
             audio = audio.astype(np.float32)
 
+        # 音声の正規化（レベルを-1.0～1.0に調整）
+        max_val = np.max(np.abs(audio))
+        if max_val > 0:
+            audio = audio / max_val * 0.95  # クリッピング防止
+
         # 音声認識実行
-        # 精度向上と安定性のバランスを取った設定
+        # VAD フィルタは無効化（audio_capture 側で既に音声検出を行っているため）
+        # 重複VAD処理による無音繰り返し問題を解決
         segments, info = self._model.transcribe(
             audio,
             language="en",
-            beam_size=10,  # 改善：5 → 10 に引き上げ（5は低すぎ、15は不安定）
-            vad_filter=True,  # VAD で無音区間をスキップ
-            vad_parameters=dict(
-                min_silence_duration_ms=500,
-                speech_pad_ms=200,
-            ),
+            beam_size=5,  # 安定性重視
+            vad_filter=False,  # 改善：True → False（audio_capture側で管理）
         )
 
-        # セグメントを結合
+        # セグメントを結合（重複排除）
         text_parts = []
+        seen_texts = set()  # 既に追加したテキストを追跡
+
         for segment in segments:
             text = segment.text.strip()
-            if text:
+            if text and text not in seen_texts:  # 重複を除外
                 text_parts.append(text)
+                seen_texts.add(text)
+            elif text and text in seen_texts:
+                # 重複を検出した場合はログ出力
+                print(f"[Transcriber] 重複セグメント検出（スキップ）: {text[:50]}...")
 
         result = " ".join(text_parts)
         return result

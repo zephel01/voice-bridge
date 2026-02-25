@@ -21,7 +21,7 @@ class AudioCapture:
         device_name: str = "BlackHole 2ch",
         sample_rate: int = 16000,
         chunk_duration: float = 4.0,
-        silence_threshold: float = 0.01,
+        silence_threshold: float = 0.03,  # 改善：0.01 → 0.03（より明確な音声検出）
     ):
         self.device_name = device_name
         self.sample_rate = sample_rate
