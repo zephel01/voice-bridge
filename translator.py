@@ -1,6 +1,6 @@
 """
 翻訳モジュール
-deep-translator を使って英語を日本語に翻訳する
+deep-translator を使って複数言語間の翻訳を行う
 専門用語辞書サポート付き
 """
 
@@ -14,13 +14,54 @@ except ImportError:
 
 
 class Translator:
-    """Google Translate を使った英日翻訳 + 専門用語辞書対応"""
+    """Google Translate を使った複数言語翻訳 + 専門用語辞書対応"""
+
+    # サポートされている言語ペア
+    # 注: GoogleTranslator は特定の言語コード形式を要求（zh-CN/zh-TW など）
+    SUPPORTED_LANGUAGE_PAIRS = {
+        ("en", "ja"), ("ja", "en"),
+        ("zh-CN", "ja"), ("ja", "zh-CN"),  # 中国語（簡体字）
+        ("es", "ja"), ("ja", "es"),
+        ("fr", "ja"), ("ja", "fr"),
+        ("de", "ja"), ("ja", "de"),
+        ("ko", "ja"), ("ja", "ko"),
+    }
+
+    # 言語コードのマッピング（UI用）
+    LANGUAGE_CODE_MAP = {
+        "zh": "zh-CN",  # zh を zh-CN に変換
+    }
+
+    LANGUAGE_NAMES = {
+        "en": "English",
+        "ja": "日本語",
+        "zh": "中国語",
+        "es": "スペイン語",
+        "fr": "フランス語",
+        "de": "ドイツ語",
+        "ko": "韓国語",
+    }
 
     def __init__(self, source: str = "en", target: str = "ja", max_retries: int = 3):
+        # 言語コード変換
+        source = self.LANGUAGE_CODE_MAP.get(source, source)
+        target = self.LANGUAGE_CODE_MAP.get(target, target)
+
+        # 言語ペアの検証
+        if (source, target) not in self.SUPPORTED_LANGUAGE_PAIRS:
+            raise ValueError(
+                f"サポートされていない言語ペア: {source}→{target}\n"
+                f"対応ペア: {self.SUPPORTED_LANGUAGE_PAIRS}"
+            )
+
         self.source = source
         self.target = target
         self.max_retries = max_retries
         self._translator = GoogleTranslator(source=source, target=target)
+
+        source_name = self.LANGUAGE_NAMES.get(source, source)
+        target_name = self.LANGUAGE_NAMES.get(target, target)
+        print(f"[Translator] {source_name} ({source}) → {target_name} ({target})")
 
         # 専門用語辞書（分野別）
         self.terminology = {
@@ -95,6 +136,26 @@ class Translator:
         """ユーザーが追加の専門用語を登録する"""
         self.terminology.update(term_dict)
         print(f"[Translator] {len(term_dict)}個の用語を追加しました")
+
+    def set_language_pair(self, source: str, target: str) -> bool:
+        """言語ペアを動的に変更"""
+        # 言語コード変換
+        source = self.LANGUAGE_CODE_MAP.get(source, source)
+        target = self.LANGUAGE_CODE_MAP.get(target, target)
+
+        if (source, target) not in self.SUPPORTED_LANGUAGE_PAIRS:
+            print(f"[Translator] サポートされていない言語ペア: {source}→{target}")
+            print(f"[Translator] 対応ペア: {self.SUPPORTED_LANGUAGE_PAIRS}")
+            return False
+
+        self.source = source
+        self.target = target
+        self._translator = GoogleTranslator(source=source, target=target)
+
+        source_name = self.LANGUAGE_NAMES.get(source, source)
+        target_name = self.LANGUAGE_NAMES.get(target, target)
+        print(f"[Translator] 言語ペアを変更: {source_name} ({source}) → {target_name} ({target})")
+        return True
 
     def _remove_duplicate_sentences(self, text: str) -> str:
         """

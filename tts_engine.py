@@ -1,6 +1,7 @@
 """
 TTS モジュール
-edge-tts を使って日本語テキストを音声に変換する
+edge-tts を使って複数言語のテキストを音声に変換する
+対応言語: ja, en, zh, es, fr, de, ko
 """
 
 import asyncio
@@ -14,27 +15,67 @@ except ImportError:
 
 
 class TTSEngine:
-    """Microsoft Edge TTS を使った日本語音声合成"""
+    """Microsoft Edge TTS を使った複数言語音声合成"""
 
-    # 利用可能な日本語音声
-    VOICES = {
-        "nanami": "ja-JP-NanamiNeural",   # 女性（自然で聞きやすい）
-        "keita": "ja-JP-KeitaNeural",     # 男性
+    # 言語別の利用可能な音声
+    LANGUAGE_VOICES = {
+        "ja": {  # 日本語
+            "nanami": "ja-JP-NanamiNeural",   # 女性（自然で聞きやすい）
+            "keita": "ja-JP-KeitaNeural",     # 男性
+        },
+        "en": {  # 英語
+            "jenny": "en-US-JennyNeural",     # 女性
+            "guy": "en-US-GuyNeural",         # 男性
+        },
+        "zh": {  # 中国語
+            "xiaoxiao": "zh-CN-XiaoxiaoNeural",  # 女性
+            "yunxi": "zh-CN-YunxiNeural",        # 男性
+        },
+        "es": {  # スペイン語
+            "elvira": "es-ES-ElviraNeural",   # 女性
+            "alvaro": "es-ES-AlvaroNeural",   # 男性
+        },
+        "fr": {  # フランス語
+            "denise": "fr-FR-DeniseNeural",   # 女性
+            "henri": "fr-FR-HenriNeural",     # 男性
+        },
+        "de": {  # ドイツ語
+            "katja": "de-DE-KatjaNeural",     # 女性
+            "conrad": "de-DE-ConradNeural",   # 男性
+        },
+        "ko": {  # 韓国語
+            "sunhi": "ko-KR-SunHiNeural",     # 女性
+            "injoon": "ko-KR-InJoonNeural",   # 男性
+        },
     }
 
-    def __init__(self, voice: str = "nanami", rate: str = "+0%", volume: str = "+0%"):
+    # 後方互換性のため、従来の VOICES 名前も保持
+    VOICES = LANGUAGE_VOICES.get("ja", {})
+
+    def __init__(self, language: str = "ja", voice: str = "nanami", rate: str = "+0%", volume: str = "+0%"):
         """
         Args:
-            voice: 音声名 ("nanami" or "keita")
+            language: 対象言語 (ja/en/zh/es/fr/de/ko, default: ja)
+            voice: 言語別の音声名 (例: 日本語は "nanami"/"keita")
             rate: 速度調整 (例: "+10%", "-20%")
             volume: 音量調整 (例: "+10%", "-20%")
         """
-        self.voice = self.VOICES.get(voice, voice)
+        self.language = language
+
+        # 言語別の音声を選択
+        if language not in self.LANGUAGE_VOICES:
+            raise ValueError(f"サポートされていない言語: {language}")
+
+        language_voices = self.LANGUAGE_VOICES[language]
+        self.voice = language_voices.get(voice, list(language_voices.values())[0])
+
         self.rate = rate
         self.volume = volume
         self._temp_dir = tempfile.mkdtemp(prefix="voice_bridge_")
         self._counter = 0
         self._loop = None
+
+        print(f"[TTSEngine] 言語: {language}, 音声: {self.voice}")
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
         """イベントループを取得（なければ新規作成）"""
@@ -83,8 +124,28 @@ class TTSEngine:
 
     def set_voice(self, voice: str):
         """音声を変更"""
-        self.voice = self.VOICES.get(voice, voice)
+        language_voices = self.LANGUAGE_VOICES.get(self.language, {})
+        self.voice = language_voices.get(voice, voice)
         print(f"[TTSEngine] 音声を変更: {self.voice}")
+
+    def set_language(self, language: str, voice: str = None) -> bool:
+        """言語を変更"""
+        if language not in self.LANGUAGE_VOICES:
+            print(f"[TTSEngine] サポートされていない言語: {language}")
+            return False
+
+        self.language = language
+        language_voices = self.LANGUAGE_VOICES[language]
+
+        # 音声が指定されている場合
+        if voice and voice in language_voices:
+            self.voice = language_voices[voice]
+        else:
+            # 指定されていない場合は、言語のデフォルト音声を使用
+            self.voice = list(language_voices.values())[0]
+
+        print(f"[TTSEngine] 言語を {language} に変更、音声: {self.voice}")
+        return True
 
     def set_rate(self, rate: str):
         """速度を変更"""

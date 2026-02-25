@@ -40,26 +40,39 @@ class VoiceBridge:
         self,
         device_name: str = DEFAULT_DEVICE,
         model_size: str = "small",
+        source_language: str = "en",
+        target_language: str = "ja",
+        tts_language: str = None,
         voice: str = "nanami",
         chunk_duration: float = 4.0,
         use_voicevox: bool = False,
         voicevox_speaker_id: int = 3,
     ):
+        # TTS言語はデフォルトで翻訳言語と同じ
+        if tts_language is None:
+            tts_language = target_language
+
+        self.source_language = source_language
+        self.target_language = target_language
+        self.tts_language = tts_language
+
         self.capture = AudioCapture(
             device_name=device_name,
             chunk_duration=chunk_duration,
         )
-        self.transcriber = Transcriber(model_size=model_size)
-        self.translator = Translator()
+        self.transcriber = Transcriber(model_size=model_size, language=source_language)
+        self.translator = Translator(source=source_language, target=target_language)
 
-        # TTS エンジン: VOICEVOX が利用可能ならそちらを使う
+        # TTS エンジン: VOICEVOX が利用可能ならそちらを使う（ただし日本語のみ対応）
         self.use_voicevox = use_voicevox
-        if use_voicevox:
+        if use_voicevox and tts_language == "ja":
             self.tts = VoicevoxTTS(speaker_id=voicevox_speaker_id)
             print(f"[VoiceBridge] TTS: VOICEVOX (speaker_id={voicevox_speaker_id})")
         else:
-            self.tts = TTSEngine(voice=voice)
-            print(f"[VoiceBridge] TTS: Edge TTS (voice={voice})")
+            if use_voicevox and tts_language != "ja":
+                print(f"[VoiceBridge] VOICEVOX は日本語のみ対応のため、Edge TTS にフォールバック")
+            self.tts = TTSEngine(language=tts_language, voice=voice)
+            print(f"[VoiceBridge] TTS: Edge TTS (language={tts_language})")
 
         self.player = AudioPlayer()
 
@@ -114,33 +127,35 @@ class VoiceBridge:
                 self._notify_status("キャプチャ中...")
                 continue
 
-            print(f"[EN] {english_text}")
+            source_label = self.source_language.upper()
+            print(f"[{source_label}] {english_text}")
             if self.on_english_text:
                 self.on_english_text(english_text)
 
-            # 3. 翻訳（英→日）
+            # 3. 翻訳
             self._notify_status("翻訳中...")
             t_step = time.time()
             try:
-                japanese_text = self.translator.translate(english_text)
+                translated_text = self.translator.translate(english_text)
             except Exception as e:
                 print(f"[Pipeline] 翻訳エラー: {e}")
                 continue
             t_translate = time.time() - t_step
 
-            if not japanese_text.strip():
+            if not translated_text.strip():
                 self._notify_status("キャプチャ中...")
                 continue
 
-            print(f"[JA] {japanese_text}")
+            target_label = self.target_language.upper()
+            print(f"[{target_label}] {translated_text}")
             if self.on_japanese_text:
-                self.on_japanese_text(japanese_text)
+                self.on_japanese_text(translated_text)
 
-            # 4. 日本語音声合成
+            # 4. 音声合成
             self._notify_status("音声合成中...")
             t_step = time.time()
             try:
-                audio_path = self.tts.synthesize(japanese_text)
+                audio_path = self.tts.synthesize(translated_text)
             except Exception as e:
                 print(f"[Pipeline] TTS エラー: {e}")
                 continue
@@ -210,6 +225,27 @@ class VoiceBridge:
         else:
             self.tts.set_voice(voice_key)
 
+    def change_language_pair(self, source: str, target: str) -> bool:
+        """言語ペアを動的に変更"""
+        # Transcriber の言語変更
+        if not self.transcriber.set_language(source):
+            return False
+
+        # Translator の言語ペア変更
+        if not self.translator.set_language_pair(source, target):
+            return False
+
+        # TTS の言語変更（ターゲット言語に合わせる）
+        if not self.tts.set_language(target):
+            return False
+
+        # 内部状態を更新
+        self.source_language = source
+        self.target_language = target
+
+        print(f"[VoiceBridge] 言語ペアを {source}→{target} に変更")
+        return True
+
 
 def run_cli(args):
     """CLI モードで実行"""
@@ -217,6 +253,9 @@ def run_cli(args):
     bridge = VoiceBridge(
         device_name=args.device,
         model_size=args.model,
+        source_language=args.source_lang,
+        target_language=args.target_lang,
+        tts_language=args.tts_lang,
         voice=args.voice,
         chunk_duration=args.chunk,
         use_voicevox=use_voicevox,
@@ -278,6 +317,9 @@ def run_gui(args):
     bridge = VoiceBridge(
         device_name=args.device,
         model_size=args.model,
+        source_language=args.source_lang,
+        target_language=args.target_lang,
+        tts_language=args.tts_lang,
         voice=args.voice,
         chunk_duration=args.chunk,
         use_voicevox=voicevox_available,
@@ -298,6 +340,10 @@ def run_gui(args):
         else:
             bridge.change_voice(voice_key)
 
+    # 言語ペア変更のコールバック
+    def on_language_pair_change(source: str, target: str):
+        bridge.change_language_pair(source, target)
+
     gui = VoiceBridgeGUI(
         on_start=bridge.start,
         on_stop=bridge.stop,
@@ -305,6 +351,7 @@ def run_gui(args):
         on_model_change=bridge.change_model,
         on_device_change=bridge.change_device,
         on_voice_change=on_voice_change,
+        on_language_pair_change=on_language_pair_change,
     )
 
     # GUI にテキストを表示するコールバック
@@ -322,7 +369,13 @@ def run_gui(args):
         voice_list = ["nanami（女性）", "keita（男性）"]
         default_voice = "nanami（女性）"
 
-    gui.build(devices=devices, voices=voice_list, default_voice=default_voice)
+    gui.build(
+        devices=devices,
+        voices=voice_list,
+        default_voice=default_voice,
+        default_source_lang=args.source_lang,
+        default_target_lang=args.target_lang,
+    )
 
     # VOICEVOX 利用表記（利用規約に基づくクレジット表記）
     if voicevox_available:
@@ -334,7 +387,7 @@ def run_gui(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Voice Bridge - リアルタイム英日翻訳",
+        description="Voice Bridge - リアルタイム多言語翻訳",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--cli", action="store_true", help="CLI モードで起動（デバッグ用）")
@@ -343,7 +396,16 @@ def main():
                         help=f"入力デバイス名 (default: {DEFAULT_DEVICE})")
     parser.add_argument("--model", default="small", choices=["tiny", "base", "small", "medium"],
                         help="Whisper モデルサイズ")
-    parser.add_argument("--voice", default="nanami", choices=["nanami", "keita"],
+    parser.add_argument("--source-lang", default="en",
+                        choices=["en", "ja", "zh", "es", "fr", "de", "ko"],
+                        help="認識言語 (default: en)")
+    parser.add_argument("--target-lang", default="ja",
+                        choices=["en", "ja", "zh", "es", "fr", "de", "ko"],
+                        help="翻訳言語 (default: ja)")
+    parser.add_argument("--tts-lang", default=None,
+                        choices=["en", "ja", "zh", "es", "fr", "de", "ko"],
+                        help="音声合成言語 (default: target-lang と同じ)")
+    parser.add_argument("--voice", default="nanami", choices=["nanami", "keita", "jenny", "guy", "xiaoxiao", "yunxi", "elvira", "alvaro", "denise", "henri", "katja", "conrad", "sunhi", "injoon"],
                         help="Edge TTS 音声 (VOICEVOX未使用時)")
     parser.add_argument("--speaker-id", type=int, default=3,
                         help="VOICEVOX speaker ID (default: 3 = ずんだもん)")
