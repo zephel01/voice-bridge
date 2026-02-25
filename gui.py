@@ -12,7 +12,29 @@ import queue
 class VoiceBridgeGUI:
     """Voice Bridge の GUI"""
 
-    def __init__(self, on_start=None, on_stop=None, on_clear=None, on_model_change=None, on_device_change=None, on_voice_change=None, on_rate_change=None):
+    # 言語コード → 表示用言語名（emoji付き）のマッピング
+    LANGUAGE_DISPLAY = {
+        "en": "🇺🇸 English",
+        "ja": "🇯🇵 日本語",
+        "zh": "🇨🇳 中国語",
+        "es": "🇪🇸 スペイン語",
+        "fr": "🇫🇷 フランス語",
+        "de": "🇩🇪 ドイツ語",
+        "ko": "🇰🇷 韓国語",
+    }
+
+    # 言語コード → ドロップダウン表示用（言語名付き）のマッピング
+    LANGUAGE_DROPDOWN = {
+        "en": "en (English)",
+        "ja": "ja (日本語)",
+        "zh": "zh (中国語)",
+        "es": "es (スペイン語)",
+        "fr": "fr (フランス語)",
+        "de": "de (ドイツ語)",
+        "ko": "ko (韓国語)",
+    }
+
+    def __init__(self, on_start=None, on_stop=None, on_clear=None, on_model_change=None, on_device_change=None, on_voice_change=None, on_rate_change=None, on_language_pair_change=None):
         """
         Args:
             on_start: 開始ボタン押下時のコールバック
@@ -22,6 +44,7 @@ class VoiceBridgeGUI:
             on_device_change: デバイス変更時のコールバック (device_name: str)
             on_voice_change: 音声変更時のコールバック (voice: str)
             on_rate_change: 速度変更時のコールバック (rate: str)
+            on_language_pair_change: 言語ペア変更時のコールバック (source: str, target: str)
         """
         self.on_start = on_start
         self.on_stop = on_stop
@@ -30,18 +53,21 @@ class VoiceBridgeGUI:
         self.on_device_change = on_device_change
         self.on_voice_change = on_voice_change
         self.on_rate_change = on_rate_change
+        self.on_language_pair_change = on_language_pair_change
 
         self._message_queue: queue.Queue = queue.Queue()
         self._running = False
         self.root = None
         self._level_canvas = None
         self._latency_var = None
+        self._source_lang_label = None  # ソース言語のテキストボックスラベル
+        self._target_lang_label = None  # ターゲット言語のテキストボックスラベル
 
-    def build(self, devices: list[str] = None, voices: list[str] = None, default_voice: str = None):
+    def build(self, devices: list[str] = None, voices: list[str] = None, default_voice: str = None, default_source_lang: str = "en", default_target_lang: str = "ja"):
         """GUI を構築"""
         self.root = tk.Tk()
-        self.root.title("Voice Bridge - リアルタイム英日翻訳")
-        self.root.geometry("700x600")
+        self.root.title("Voice Bridge - リアルタイム多言語翻訳")
+        self.root.geometry("800x650")
         self.root.configure(bg="#1e1e2e")
         self.root.resizable(True, True)
 
@@ -97,6 +123,34 @@ class VoiceBridgeGUI:
         voice_combo.grid(row=1, column=1, columnspan=5, sticky=tk.W, pady=(8, 0))
         voice_combo.bind("<<ComboboxSelected>>", self._on_voice_changed)
 
+        # 言語選択（3行目に配置）
+        ttk.Label(settings_frame, text="言語:").grid(row=2, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
+
+        # ソース言語選択
+        self.source_lang_var = tk.StringVar(value=default_source_lang)
+        source_lang_dropdown_values = [self.LANGUAGE_DROPDOWN[lang] for lang in ["en", "ja", "zh", "es", "fr", "de", "ko"]]
+        source_lang_combo = ttk.Combobox(
+            settings_frame, textvariable=self.source_lang_var,
+            values=source_lang_dropdown_values, width=15, state="readonly"
+        )
+        source_lang_combo.set(self.LANGUAGE_DROPDOWN[default_source_lang])
+        source_lang_combo.grid(row=2, column=1, sticky=tk.W, pady=(8, 0))
+        source_lang_combo.bind("<<ComboboxSelected>>", self._on_language_pair_changed)
+
+        # ↔ 矢印ラベル
+        ttk.Label(settings_frame, text="↔").grid(row=2, column=2, padx=5, pady=(8, 0))
+
+        # ターゲット言語選択
+        self.target_lang_var = tk.StringVar(value=default_target_lang)
+        target_lang_dropdown_values = [self.LANGUAGE_DROPDOWN[lang] for lang in ["en", "ja", "zh", "es", "fr", "de", "ko"]]
+        target_lang_combo = ttk.Combobox(
+            settings_frame, textvariable=self.target_lang_var,
+            values=target_lang_dropdown_values, width=15, state="readonly"
+        )
+        target_lang_combo.set(self.LANGUAGE_DROPDOWN[default_target_lang])
+        target_lang_combo.grid(row=2, column=3, sticky=tk.W, pady=(8, 0))
+        target_lang_combo.bind("<<ComboboxSelected>>", self._on_language_pair_changed)
+
         # --- ボタンエリア ---
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill=tk.X, pady=(0, 10))
@@ -104,6 +158,7 @@ class VoiceBridgeGUI:
         self.start_btn = tk.Button(
             btn_frame, text="▶ 開始", command=self._on_start,
             bg="#a6e3a1", fg="#1e1e2e", font=("Helvetica", 13, "bold"),
+            activebackground="#9fc593", activeforeground="#1e1e2e",
             width=12, height=1, relief=tk.FLAT, cursor="hand2"
         )
         self.start_btn.pack(side=tk.LEFT, padx=(0, 10))
@@ -111,6 +166,7 @@ class VoiceBridgeGUI:
         self.stop_btn = tk.Button(
             btn_frame, text="■ 停止", command=self._on_stop,
             bg="#f38ba8", fg="#1e1e2e", font=("Helvetica", 13, "bold"),
+            activebackground="#e89aaa", activeforeground="#1e1e2e",
             width=12, height=1, relief=tk.FLAT, cursor="hand2", state=tk.DISABLED
         )
         self.stop_btn.pack(side=tk.LEFT, padx=(0, 10))
@@ -118,6 +174,7 @@ class VoiceBridgeGUI:
         self.clear_btn = tk.Button(
             btn_frame, text="🗑 クリア", command=self._on_clear,
             bg="#89b4fa", fg="#1e1e2e", font=("Helvetica", 13, "bold"),
+            activebackground="#7aa8e8", activeforeground="#1e1e2e",
             width=12, height=1, relief=tk.FLAT, cursor="hand2"
         )
         self.clear_btn.pack(side=tk.LEFT)
@@ -151,8 +208,9 @@ class VoiceBridgeGUI:
         ttk.Label(monitor_frame, textvariable=self._latency_detail_var,
                   font=("Helvetica", 9), foreground="#a6adc8").pack(side=tk.LEFT)
 
-        # --- 英語テキスト表示 ---
-        ttk.Label(main_frame, text="🇺🇸 English").pack(anchor=tk.W, pady=(5, 2))
+        # --- ソース言語テキスト表示（動的に更新） ---
+        self._source_lang_label = ttk.Label(main_frame, text=self.LANGUAGE_DISPLAY[default_source_lang])
+        self._source_lang_label.pack(anchor=tk.W, pady=(5, 2))
         self.en_text = scrolledtext.ScrolledText(
             main_frame, height=8, wrap=tk.WORD,
             bg="#313244", fg="#cdd6f4", font=("Helvetica", 12),
@@ -161,8 +219,9 @@ class VoiceBridgeGUI:
         self.en_text.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
         self.en_text.configure(state=tk.DISABLED)
 
-        # --- 日本語テキスト表示 ---
-        ttk.Label(main_frame, text="🇯🇵 日本語").pack(anchor=tk.W, pady=(0, 2))
+        # --- ターゲット言語テキスト表示（動的に更新） ---
+        self._target_lang_label = ttk.Label(main_frame, text=self.LANGUAGE_DISPLAY[default_target_lang])
+        self._target_lang_label.pack(anchor=tk.W, pady=(0, 2))
         self.ja_text = scrolledtext.ScrolledText(
             main_frame, height=8, wrap=tk.WORD,
             bg="#313244", fg="#f9e2af", font=("Helvetica", 12),
@@ -217,6 +276,27 @@ class VoiceBridgeGUI:
     def _on_voice_changed(self, event=None):
         if self.on_voice_change:
             self.on_voice_change(self.voice_var.get())
+
+    def _on_language_pair_changed(self, event=None):
+        """言語ペア変更イベント"""
+        source_display = self.source_lang_var.get()
+        target_display = self.target_lang_var.get()
+
+        # ドロップダウン表示形式から言語コードを抽出 (e.g., "en (English)" → "en")
+        source = source_display.split()[0] if source_display else "en"
+        target = target_display.split()[0] if target_display else "ja"
+
+        # 言語ペアの妥当性チェック
+        if source == target:
+            print(f"[GUI] 警告: ソース言語とターゲット言語が同じです")
+            return
+
+        # テキストボックスのラベルを動的に更新
+        self._source_lang_label.configure(text=self.LANGUAGE_DISPLAY[source])
+        self._target_lang_label.configure(text=self.LANGUAGE_DISPLAY[target])
+
+        if self.on_language_pair_change:
+            self.on_language_pair_change(source, target)
 
     def _on_close(self):
         self._running = False
