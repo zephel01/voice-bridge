@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+__pycache__/*
 *.py[cod]
 *$py.class
 *.so
@@ -40,5 +41,8 @@ Thumbs.db
 
 # AI ツール設定
 .claude/
+.claude/*
 .crush/
+.crush/*
 .serena/
+.serena/*
