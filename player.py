@@ -22,6 +22,9 @@ class AudioPlayer:
         self._running = False
         self._thread = None
         self._initialized = False
+        self.is_playing = False  # 現在再生中かどうか
+        self.on_play_start = None  # 再生開始コールバック
+        self.on_play_end = None    # 再生終了コールバック
 
     def _init_mixer(self):
         """pygame mixer を初期化"""
@@ -44,12 +47,20 @@ class AudioPlayer:
 
             try:
                 if os.path.exists(file_path):
+                    self.is_playing = True
+                    if self.on_play_start:
+                        self.on_play_start()
+
                     pygame.mixer.music.load(file_path)
                     pygame.mixer.music.play()
 
                     # 再生完了を待つ
                     while pygame.mixer.music.get_busy() and self._running:
                         time.sleep(0.1)
+
+                    self.is_playing = False
+                    if self.on_play_end:
+                        self.on_play_end()
 
                     # 再生済みファイルを削除
                     try:

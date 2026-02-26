@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 仮想環境
+.venv/
+venv/
+env/
+
+# バックアップ・一時ファイル
+*.backup
+*.bak
+*.tmp
+capture.log
+
+# Whisper モデルキャッシュ
+*.bin
+*.pt
+
+# TTS 一時ファイル
+voice_bridge_*/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / エディタ
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# AI ツール設定
+.claude/
+.crush/
+.serena/
