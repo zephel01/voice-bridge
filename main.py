@@ -78,6 +78,7 @@ class VoiceBridge:
 
         self._running = False
         self._pipeline_thread = None
+        self._is_playing = False  # TTS再生中フラグ（フィードバックループ防止）
 
         # GUI コールバック用
         self.on_english_text = None
@@ -89,10 +90,32 @@ class VoiceBridge:
         # 音声レベルコールバックを AudioCapture に接続
         self.capture.on_level = self._on_capture_level
 
+        # 再生状態のコールバックを AudioPlayer に接続（フィードバックループ防止）
+        self.player.on_play_start = self._on_play_start
+        self.player.on_play_end = self._on_play_end
+
     def _on_capture_level(self, rms: float, is_active: bool):
         """AudioCapture からのレベル通知を中継"""
         if self.on_level:
             self.on_level(rms, is_active)
+
+    def _on_play_start(self):
+        """TTS 再生開始時 — キャプチャを抑制"""
+        self._is_playing = True
+        print("[VoiceBridge] TTS再生開始 → キャプチャ抑制")
+
+    def _on_play_end(self):
+        """TTS 再生終了時 — キャプチャを再開（少し待ってバッファに残るTTS音声を捨てる）"""
+        # 再生終了直後のバッファにTTS音声の残りが入っている可能性があるので少し待つ
+        time.sleep(0.3)
+        # バッファに溜まったチャンクを捨てる
+        while not self.capture.audio_queue.empty():
+            try:
+                self.capture.audio_queue.get_nowait()
+            except Exception:
+                break
+        self._is_playing = False
+        print("[VoiceBridge] TTS再生終了 → キャプチャ再開")
 
     def _notify_latency(self, latency: float, stage: str):
         """遅延情報を通知"""
@@ -109,6 +132,11 @@ class VoiceBridge:
             # 1. 音声チャンクを取得
             audio_chunk = self.capture.get_chunk(timeout=1.0)
             if audio_chunk is None:
+                continue
+
+            # TTS 再生中はキャプチャしたチャンクを捨てる（フィードバックループ防止）
+            if self._is_playing:
+                print("[Pipeline] TTS再生中のため音声チャンクをスキップ")
                 continue
 
             t_start = time.time()

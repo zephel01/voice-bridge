@@ -27,6 +27,27 @@ class Transcriber:
         "ko": "韓国語",
     }
 
+    # Whisper が無音時に出力しがちなハルシネーション（幻聴）パターン
+    HALLUCINATION_PATTERNS = [
+        "thank you",
+        "thanks for watching",
+        "subscribe",
+        "like and subscribe",
+        "please subscribe",
+        "see you next time",
+        "bye bye",
+        "goodbye",
+        "thank you for watching",
+        "thanks for listening",
+        "the end",
+        "you",
+        "...",
+        "ご視聴ありがとうございました",
+        "おやすみなさい",
+        "ではまた",
+        "お疲れ様でした",
+    ]
+
     def __init__(self, model_size: str = "small", language: str = "en", device: str = "cpu", compute_type: str = "int8"):
         """
         Args:
@@ -98,7 +119,38 @@ class Transcriber:
                 print(f"[Transcriber] 重複セグメント検出（スキップ）: {text[:50]}...")
 
         result = " ".join(text_parts)
+
+        # ハルシネーション（幻聴）チェック
+        if self._is_hallucination(result):
+            print(f"[Transcriber] ハルシネーション検出（スキップ）: {result[:80]}")
+            return ""
+
         return result
+
+    def _is_hallucination(self, text: str) -> bool:
+        """Whisper のハルシネーション（無音時の幻聴テキスト）を検出"""
+        if not text:
+            return False
+
+        text_lower = text.strip().lower().rstrip(".!?,。！？、")
+
+        # 完全一致 or ほぼ一致チェック
+        for pattern in self.HALLUCINATION_PATTERNS:
+            if text_lower == pattern.lower():
+                return True
+
+        # 非常に短いテキスト（3文字以下）はハルシネーションの可能性が高い
+        if len(text.strip()) <= 3:
+            print(f"[Transcriber] 短すぎるテキスト検出: '{text}'")
+            return True
+
+        # 同じフレーズの繰り返し検出（例: "Thank you. Thank you. Thank you."）
+        words = text.strip().split('.')
+        words = [w.strip() for w in words if w.strip()]
+        if len(words) >= 2 and len(set(w.lower() for w in words)) == 1:
+            return True
+
+        return False
 
     def change_model(self, model_size: str):
         """モデルサイズを変更"""
