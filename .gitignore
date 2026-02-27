@@ -41,8 +41,12 @@ Thumbs.db
 
 # AI ツール設定
 .claude/
-.claude/*
 .crush/
-.crush/*
 .serena/
-.serena/*
+
+# 内部ドキュメント（公開不要）
+docs/done/
+docs/internal/
+
+# Note 記事原稿
+note_article*.md
