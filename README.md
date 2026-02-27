@@ -56,6 +56,41 @@ python main.py --model medium                      # 高精度モデル
 python main.py --list-devices                      # デバイス一覧
 ```
 
+#### デバイス一覧の確認（`--list-devices`）
+
+`--list-devices` を実行すると、利用可能な音声入力デバイスの一覧が表示されます。
+
+```bash
+python main.py --list-devices
+```
+
+出力例：
+
+```
+利用可能な入力デバイス:
+  [0] MacBook Pro マイク (ch=1)
+  [1] BlackHole 2ch (ch=2) [LOOPBACK]
+  [2] AirPods Pro (ch=1)
+  [3] 複合デバイス (ch=2)
+```
+
+各項目の意味：
+
+- `[番号]` — `--device` オプションに指定するインデックス番号
+- `デバイス名` — マイクや仮想デバイスの名称
+- `ch=N` — チャンネル数（1=モノラル、2=ステレオ）
+- `[LOOPBACK]` — システム音声をキャプチャできるデバイス（Windows の WASAPI ループバック等）
+
+翻訳モード（システム音声キャプチャ）では BlackHole や複合デバイス、LOOPBACK デバイスを選択してください。チャットモード（マイク入力）ではマイクデバイスを選択します。
+
+```bash
+# 例: BlackHole でシステム音声をキャプチャ（翻訳モード）
+python main.py --device 1
+
+# 例: AirPods のマイクで音声入力（チャットモード）
+python main.py --mode chat --device 2 --source-lang ja
+```
+
 #### Moonshine エンジンで起動
 
 [Moonshine](https://github.com/moonshine-ai/moonshine) はストリーミング対応の軽量 ASR エンジンです。Whisper と比べて低レイテンシ・高精度で、ハルシネーション（無音時の幻聴テキスト）も大幅に減少します。`--chunk 2.0` との併用で応答速度がさらに向上します。
