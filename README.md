@@ -56,13 +56,14 @@ python main.py --model medium                      # 高精度モデル
 python main.py --list-devices                      # デバイス一覧
 ```
 
-#### Moonshine エンジンで起動（実験的）
+#### Moonshine エンジンで起動
 
-[Moonshine](https://github.com/moonshine-ai/moonshine) はストリーミング対応の軽量 ASR エンジンです。Whisper と比べて低レイテンシ・高精度が期待できます。
+[Moonshine](https://github.com/moonshine-ai/moonshine) はストリーミング対応の軽量 ASR エンジンです。Whisper と比べて低レイテンシ・高精度で、ハルシネーション（無音時の幻聴テキスト）も大幅に減少します。`--chunk 2.0` との併用で応答速度がさらに向上します。
 
 ```bash
 pip install moonshine-voice
 python main.py --asr moonshine                     # GUI モード（Moonshine）
+python main.py --asr moonshine --chunk 2.0         # 低レイテンシ（推奨）
 python main.py --asr moonshine --cli               # CLI モード（Moonshine）
 ```
 
