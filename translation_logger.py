@@ -1,6 +1,7 @@
 """
 翻訳ログモジュール
-認識テキストと翻訳テキストを YYYYMMDD.log として保存する
+認識テキストと翻訳テキストを YYYYMMDD_HHMMSS.log として保存する
+（セッション開始時刻ごとに1ファイル）
 
 ログ形式:
   HH:MM:SS [EN→JA] source_text | translated_text
@@ -16,7 +17,7 @@ from datetime import datetime
 
 
 class TranslationLogger:
-    """翻訳結果を日付別ログファイルに保存する"""
+    """翻訳結果をセッション別ログファイルに保存する"""
 
     def __init__(self, log_dir: str = "logs"):
         """
@@ -24,24 +25,17 @@ class TranslationLogger:
             log_dir: ログフォルダのパス（デフォルト: ./logs）
         """
         self.log_dir = log_dir
-        self._current_date = None
         self._file = None
         self._lock = threading.Lock()
 
         # ログフォルダを作成
         os.makedirs(self.log_dir, exist_ok=True)
-        print(f"[Logger] ログフォルダ: {os.path.abspath(self.log_dir)}")
 
-    def _ensure_file(self):
-        """日付が変わったらファイルを切り替える"""
-        today = datetime.now().strftime("%Y%m%d")
-        if today != self._current_date:
-            if self._file:
-                self._file.close()
-            filepath = os.path.join(self.log_dir, f"{today}.log")
-            self._file = open(filepath, "a", encoding="utf-8")
-            self._current_date = today
-            print(f"[Logger] ログファイル: {filepath}")
+        # セッション開始時にファイルを作成
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._filepath = os.path.join(self.log_dir, f"{timestamp}.log")
+        self._file = open(self._filepath, "a", encoding="utf-8")
+        print(f"[Logger] ログファイル: {self._filepath}")
 
     def log(self, source_lang: str, target_lang: str,
             source_text: str, translated_text: str):
@@ -63,7 +57,6 @@ class TranslationLogger:
         )
 
         with self._lock:
-            self._ensure_file()
             self._file.write(line)
             self._file.flush()
 
@@ -73,5 +66,4 @@ class TranslationLogger:
             if self._file:
                 self._file.close()
                 self._file = None
-                self._current_date = None
                 print("[Logger] ログファイルを閉じました")

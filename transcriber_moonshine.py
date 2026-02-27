@@ -14,6 +14,7 @@ moonshine-voice を使って複数言語の音声をテキストに変換する
 ※ fr, de は Moonshine 未対応のため、この版では使用不可
 """
 
+import re
 import numpy as np
 import threading
 
@@ -151,12 +152,49 @@ class Transcriber:
 
         result = " ".join(text_parts)
 
+        # 日本語後処理: 文字間の不要なスペースを除去
+        # Moonshine は日本語を1文字ずつスペース区切りで出力することがある
+        # 例: "い 夜 景 が 綺 ?" → "い夜景が綺?"
+        result = self._clean_japanese_text(result)
+
         # ハルシネーションチェック
         if self._is_hallucination(result):
             print(
                 f"[Transcriber/Moonshine] ハルシネーション検出（スキップ）: {result[:80]}"
             )
             return ""
+
+        return result
+
+    @staticmethod
+    def _clean_japanese_text(text: str) -> str:
+        """日本語テキストの文字間スペースを除去する
+
+        Moonshine が日本語を「い 夜 景 が 綺 ?」のように1文字ずつ
+        スペース区切りで出力する問題を修正する。
+
+        ルール:
+          - 日本語文字(ひらがな/カタカナ/漢字/句読点)同士の間のスペースを除去
+          - 日本語文字と ASCII 文字の間のスペースは保持（"東京 Tower" など）
+        """
+        if not text:
+            return text
+
+        # 日本語文字の範囲: ひらがな、カタカナ、漢字、句読点、全角記号
+        ja_char = (
+            r'[\u3000-\u303F'   # 句読点・記号
+            r'\u3040-\u309F'    # ひらがな
+            r'\u30A0-\u30FF'    # カタカナ
+            r'\u4E00-\u9FFF'    # CJK統合漢字
+            r'\uFF00-\uFFEF'    # 全角英数・記号
+            r'\u3400-\u4DBF'    # CJK拡張A
+            r'？！。、]'
+        )
+
+        # 日本語文字の間のスペースを除去
+        result = re.sub(f'({ja_char})\\s+({ja_char})', r'\1\2', text)
+        # 2回適用（"あ い う" のように連続する場合、1回では "あい う" になるため）
+        result = re.sub(f'({ja_char})\\s+({ja_char})', r'\1\2', result)
 
         return result
 

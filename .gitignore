@@ -39,6 +39,12 @@ Thumbs.db
 *.swo
 *~
 
+# 環境変数（API キー等）
+.env
+
+# 翻訳ログ
+logs/
+
 # AI ツール設定
 .claude/
 .crush/
