@@ -34,6 +34,7 @@ from translator import Translator
 from tts_engine import TTSEngine
 from tts_voicevox import VoicevoxTTS
 from player import AudioPlayer
+from translation_logger import TranslationLogger
 
 
 class VoiceBridge:
@@ -89,6 +90,7 @@ class VoiceBridge:
             print(f"[VoiceBridge] TTS: Edge TTS (language={tts_language})")
 
         self.player = AudioPlayer()
+        self.logger = TranslationLogger(log_dir="logs")
 
         self._running = False
         self._pipeline_thread = None
@@ -193,6 +195,12 @@ class VoiceBridge:
             if self.on_japanese_text:
                 self.on_japanese_text(translated_text)
 
+            # ログ保存
+            self.logger.log(
+                self.source_language, self.target_language,
+                english_text, translated_text,
+            )
+
             # 4. 音声合成
             self._notify_status("音声合成中...")
             t_step = time.time()
@@ -238,6 +246,7 @@ class VoiceBridge:
         self.capture.stop()
         self.player.stop()
         self.tts.cleanup()
+        self.logger.close()
 
         if self._pipeline_thread:
             self._pipeline_thread.join(timeout=3.0)
