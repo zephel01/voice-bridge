@@ -4,7 +4,8 @@ Voice Bridge - リアルタイム英日翻訳アプリ
 YouTubeの英語音声をリアルタイムで日本語音声に翻訳する
 
 使い方:
-  python main.py          # GUI モード
+  python main.py          # GUI モード（Whisper）
+  python main.py --asr moonshine  # Moonshine で起動
   python main.py --cli    # CLI モード（デバッグ用）
   python main.py --list-devices  # 入力デバイス一覧を表示
 """
@@ -26,7 +27,9 @@ else:
     from audio_capture import AudioCapture
     DEFAULT_DEVICE = "BlackHole 2ch"
 
-from transcriber import Transcriber
+# ASR エンジンは --asr オプションで選択（デフォルト: whisper）
+# main() の argparse で切り替え、VoiceBridge に注入する
+from transcriber import Transcriber as WhisperTranscriber
 from translator import Translator
 from tts_engine import TTSEngine
 from tts_voicevox import VoicevoxTTS
@@ -47,6 +50,7 @@ class VoiceBridge:
         chunk_duration: float = 4.0,
         use_voicevox: bool = False,
         voicevox_speaker_id: int = 3,
+        asr_engine: str = "whisper",
     ):
         # TTS言語はデフォルトで翻訳言語と同じ
         if tts_language is None:
@@ -56,11 +60,20 @@ class VoiceBridge:
         self.target_language = target_language
         self.tts_language = tts_language
 
+        self.asr_engine = asr_engine
         self.capture = AudioCapture(
             device_name=device_name,
             chunk_duration=chunk_duration,
         )
-        self.transcriber = Transcriber(model_size=model_size, language=source_language)
+
+        # ASR エンジンの選択
+        if asr_engine == "moonshine":
+            from transcriber_moonshine import Transcriber as MoonshineTranscriber
+            self.transcriber = MoonshineTranscriber(model_size=model_size, language=source_language)
+            print(f"[VoiceBridge] ASR: Moonshine (language={source_language})")
+        else:
+            self.transcriber = WhisperTranscriber(model_size=model_size, language=source_language)
+            print(f"[VoiceBridge] ASR: faster-whisper (model={model_size}, language={source_language})")
         self.translator = Translator(source=source_language, target=target_language)
 
         # TTS エンジン: VOICEVOX が利用可能ならそちらを使う（ただし日本語のみ対応）
@@ -303,6 +316,7 @@ def run_cli(args):
         chunk_duration=args.chunk,
         use_voicevox=use_voicevox,
         voicevox_speaker_id=args.speaker_id if use_voicevox else 3,
+        asr_engine=args.asr,
     )
 
     # Ctrl+C で停止
@@ -315,11 +329,12 @@ def run_cli(args):
 
     tts_name = "VOICEVOX" if use_voicevox else "Edge TTS"
     os_name = "Windows (WASAPI)" if IS_WINDOWS else "macOS (BlackHole)"
+    asr_name = "Moonshine" if args.asr == "moonshine" else f"faster-whisper ({args.model})"
     print("=" * 50)
     print("  Voice Bridge - CLI モード")
     print(f"  OS: {os_name}")
+    print(f"  ASR: {asr_name}")
     print(f"  デバイス: {args.device}")
-    print(f"  モデル: {args.model}")
     print(f"  TTS: {tts_name}")
     print(f"  チャンク: {args.chunk}秒")
     print("  Ctrl+C で停止")
@@ -367,6 +382,7 @@ def run_gui(args):
         chunk_duration=args.chunk,
         use_voicevox=voicevox_available,
         voicevox_speaker_id=default_speaker_id,
+        asr_engine=args.asr,
     )
 
     # 声変更のコールバック
@@ -435,10 +451,12 @@ def main():
     )
     parser.add_argument("--cli", action="store_true", help="CLI モードで起動（デバッグ用）")
     parser.add_argument("--list-devices", action="store_true", help="入力デバイス一覧を表示")
+    parser.add_argument("--asr", default="whisper", choices=["whisper", "moonshine"],
+                        help="ASR エンジン (default: whisper)")
     parser.add_argument("--device", default=DEFAULT_DEVICE,
                         help=f"入力デバイス名 (default: {DEFAULT_DEVICE})")
     parser.add_argument("--model", default="small", choices=["tiny", "base", "small", "medium"],
-                        help="Whisper モデルサイズ")
+                        help="Whisper モデルサイズ（moonshine 使用時は無視）")
     parser.add_argument("--source-lang", default="en",
                         choices=["en", "ja", "zh", "es", "fr", "de", "ko"],
                         help="認識言語 (default: en)")
