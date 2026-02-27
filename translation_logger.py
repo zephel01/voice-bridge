@@ -57,6 +57,8 @@ class TranslationLogger:
         )
 
         with self._lock:
+            if self._file is None:
+                return
             self._file.write(line)
             self._file.flush()
 
