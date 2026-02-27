@@ -65,6 +65,7 @@ class VoiceBridge:
 
         # TTS エンジン: VOICEVOX が利用可能ならそちらを使う（ただし日本語のみ対応）
         self.use_voicevox = use_voicevox
+        self._voicevox_speaker_id = voicevox_speaker_id
         if use_voicevox and tts_language == "ja":
             self.tts = VoicevoxTTS(speaker_id=voicevox_speaker_id)
             print(f"[VoiceBridge] TTS: VOICEVOX (speaker_id={voicevox_speaker_id})")
@@ -247,7 +248,9 @@ class VoiceBridge:
         if self.use_voicevox:
             try:
                 speaker_id = int(voice_key)
-                self.tts.set_speaker(speaker_id)
+                self._voicevox_speaker_id = speaker_id
+                if isinstance(self.tts, VoicevoxTTS):
+                    self.tts.set_speaker(speaker_id)
             except ValueError:
                 print(f"[VoiceBridge] 無効な speaker_id: {voice_key}")
         else:
@@ -264,12 +267,24 @@ class VoiceBridge:
             return False
 
         # TTS の言語変更（ターゲット言語に合わせる）
-        if not self.tts.set_language(target):
-            return False
+        # VOICEVOX 使用中でターゲットが日本語以外 → Edge TTS に切り替え
+        if self.use_voicevox and isinstance(self.tts, VoicevoxTTS) and target != "ja":
+            self.tts.cleanup()
+            self.tts = TTSEngine(language=target)
+            print(f"[VoiceBridge] TTS: VOICEVOX → Edge TTS ({target})")
+        # VOICEVOX が利用可能でターゲットが日本語に戻った → VOICEVOX に復帰
+        elif self.use_voicevox and not isinstance(self.tts, VoicevoxTTS) and target == "ja":
+            self.tts.cleanup()
+            self.tts = VoicevoxTTS(speaker_id=self._voicevox_speaker_id)
+            print(f"[VoiceBridge] TTS: Edge TTS → VOICEVOX")
+        else:
+            if not self.tts.set_language(target):
+                return False
 
         # 内部状態を更新
         self.source_language = source
         self.target_language = target
+        self.tts_language = target
 
         print(f"[VoiceBridge] 言語ペアを {source}→{target} に変更")
         return True
