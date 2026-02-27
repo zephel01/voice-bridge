@@ -11,6 +11,7 @@ YouTubeの英語音声をリアルタイムで日本語音声に翻訳する
 """
 
 import argparse
+import os
 import platform
 import sys
 import threading
@@ -35,6 +36,10 @@ from tts_engine import TTSEngine
 from tts_voicevox import VoicevoxTTS
 from player import AudioPlayer
 from translation_logger import TranslationLogger
+from ai_chat import AiChat, load_dotenv
+
+# .env から環境変数をロード
+load_dotenv()
 
 
 class VoiceBridge:
@@ -52,6 +57,10 @@ class VoiceBridge:
         use_voicevox: bool = False,
         voicevox_speaker_id: int = 3,
         asr_engine: str = "whisper",
+        mode: str = "translate",
+        ai_base_url: str = "https://api.openai.com/v1",
+        ai_api_key: str = None,
+        ai_model: str = "gpt-4o-mini",
     ):
         # TTS言語はデフォルトで翻訳言語と同じ
         if tts_language is None:
@@ -75,7 +84,11 @@ class VoiceBridge:
         else:
             self.transcriber = WhisperTranscriber(model_size=model_size, language=source_language)
             print(f"[VoiceBridge] ASR: faster-whisper (model={model_size}, language={source_language})")
-        self.translator = Translator(source=source_language, target=target_language)
+        # チャットモードでは翻訳不要
+        if mode != "chat":
+            self.translator = Translator(source=source_language, target=target_language)
+        else:
+            self.translator = None
 
         # TTS エンジン: VOICEVOX が利用可能ならそちらを使う（ただし日本語のみ対応）
         self.use_voicevox = use_voicevox
@@ -91,6 +104,20 @@ class VoiceBridge:
 
         self.player = AudioPlayer()
         self.logger = TranslationLogger(log_dir="logs")
+
+        # モード: "translate"（翻訳）or "chat"（AI会話）
+        self.mode = mode
+        self.ai_chat = None
+        if mode == "chat":
+            self.ai_chat = AiChat(
+                base_url=ai_base_url,
+                api_key=ai_api_key,
+                model=ai_model,
+                response_language=tts_language or target_language,
+            )
+            print(f"[VoiceBridge] モード: AI チャット")
+        else:
+            print(f"[VoiceBridge] モード: 翻訳")
 
         self._running = False
         self._pipeline_thread = None
@@ -139,7 +166,14 @@ class VoiceBridge:
             self.on_latency(latency, stage)
 
     def _pipeline_loop(self):
-        """メインパイプラインループ"""
+        """メインパイプラインループ（モードに応じて分岐）"""
+        if self.mode == "chat":
+            self._chat_pipeline_loop()
+        else:
+            self._translate_pipeline_loop()
+
+    def _translate_pipeline_loop(self):
+        """翻訳パイプラインループ"""
         self._notify_status("モデルロード中...")
         self.transcriber.load_model()
         self._notify_status("キャプチャ中...")
@@ -223,6 +257,172 @@ class VoiceBridge:
                 f"認識{t_transcribe:.1f}s+翻訳{t_translate:.1f}s+TTS{t_tts:.1f}s")
 
             self._notify_status("キャプチャ中...")
+
+    def _chat_pipeline_loop(self):
+        """AI チャットパイプラインループ（マイク入力）"""
+        print("")
+        print("[1/4] モデルロード中...")
+        self._notify_status("モデルロード中...")
+        self.transcriber.load_model()
+        print("[1/4] モデルロード完了 ✓")
+        print("[====] マイク待機中... 話しかけてください")
+        self._notify_status("マイク待機中...")
+
+        # 発話バッファ: 無音が続くまでテキストを溜める
+        utterance_buffer = []
+        silence_count = 0
+        SILENCE_THRESHOLD = 2  # 無音チャンクが連続N回で発話終了と判定
+
+        while self._running:
+            # 1. 音声チャンクを取得
+            audio_chunk = self.capture.get_chunk(timeout=1.0)
+            if audio_chunk is None:
+                # タイムアウト = 無音扱い
+                if utterance_buffer:
+                    silence_count += 1
+                    if silence_count >= SILENCE_THRESHOLD:
+                        user_text = " ".join(utterance_buffer)
+                        utterance_buffer.clear()
+                        silence_count = 0
+                        self._chat_send_to_ai(user_text)
+                continue
+
+            # TTS 再生中はスキップ（フィードバックループ防止）
+            if self._is_playing:
+                continue
+
+            # 2. 音声認識（テキスト化）
+            if not utterance_buffer:
+                print("")
+                print("[1/4] 音声認識中...")
+            self._notify_status("認識中...")
+            t_step = time.time()
+            try:
+                chunk_text = self.transcriber.transcribe(audio_chunk)
+            except Exception as e:
+                print(f"[1/4] 音声認識エラー: {e}")
+                continue
+            t_transcribe = time.time() - t_step
+
+            if not chunk_text.strip():
+                # 無音チャンク → バッファに溜まっていれば発話終了判定
+                if utterance_buffer:
+                    silence_count += 1
+                    if silence_count >= SILENCE_THRESHOLD:
+                        user_text = " ".join(utterance_buffer)
+                        utterance_buffer.clear()
+                        silence_count = 0
+                        self._chat_send_to_ai(user_text)
+                    else:
+                        print(f"[1/4] (無音 {silence_count}/{SILENCE_THRESHOLD}...)")
+                continue
+
+            # 音声あり → バッファに追加、無音カウントリセット
+            silence_count = 0
+            utterance_buffer.append(chunk_text.strip())
+            print(f"[1/4] 認識: \"{chunk_text.strip()}\" (バッファ: {len(utterance_buffer)}件)")
+            self._notify_status(f"聞いてます... ({len(utterance_buffer)})")
+
+    def _chat_send_to_ai(self, user_text: str):
+        """バッファに溜まったテキストをまとめてAIに送信"""
+        t_start = time.time()
+        print(f"[1/4] 認識完了 ✓")
+        print(f"  YOU: {user_text}")
+        if self.on_english_text:
+            self.on_english_text(user_text)
+
+        # 3. AI に質問
+        print(f"[2/4] AI 応答待ち ({self.ai_chat.model})...")
+        self._notify_status("AI 応答中...")
+        t_step = time.time()
+        try:
+            ai_response = self.ai_chat.chat(user_text)
+        except Exception as e:
+            print(f"[2/4] AI エラー: {e}")
+            return
+        t_ai = time.time() - t_step
+
+        if not ai_response.strip():
+            print("[2/4] (空応答スキップ)")
+            self._notify_status("マイク待機中...")
+            return
+
+        print(f"[2/4] AI 応答完了 ({t_ai:.1f}s) ✓")
+        print(f"  AI:  {ai_response}")
+        if self.on_japanese_text:
+            self.on_japanese_text(ai_response)
+
+        # ログ保存
+        print("[3/4] ログ保存中...")
+        self.logger.log(
+            "user", "ai",
+            user_text, ai_response,
+        )
+        print("[3/4] ログ保存完了 ✓")
+
+        # 4. 音声合成（ずんだもん等で読み上げ）
+        print("[4/4] 音声合成中...")
+        self._notify_status("音声合成中...")
+        t_step = time.time()
+        try:
+            audio_path = self.tts.synthesize(ai_response)
+        except Exception as e:
+            print(f"[4/4] TTS エラー: {e}")
+            return
+        t_tts = time.time() - t_step
+
+        if audio_path:
+            self.player.enqueue(audio_path)
+
+        t_total = time.time() - t_start
+        print(f"[4/4] 音声合成完了 ({t_tts:.1f}s) ✓")
+        print(f"[====] 合計 {t_total:.1f}s (AI{t_ai:.1f}s + TTS{t_tts:.1f}s)")
+        self._notify_latency(t_total,
+            f"AI{t_ai:.1f}s+TTS{t_tts:.1f}s")
+
+        print("[====] マイク待機中... 話しかけてください")
+        self._notify_status("マイク待機中...")
+
+    def chat_text(self, text: str):
+        """テキスト入力から AI チャット（GUI のテキストボックス用）"""
+        if not self.ai_chat or not text.strip():
+            return
+
+        def _process():
+            print(f"[YOU] {text}")
+            if self.on_english_text:
+                self.on_english_text(text)
+
+            self._notify_status("AI 応答中...")
+            try:
+                ai_response = self.ai_chat.chat(text)
+            except Exception as e:
+                print(f"[Chat] AI エラー: {e}")
+                self._notify_status("マイク待機中..." if self._running else "停止中")
+                return
+
+            if not ai_response.strip():
+                return
+
+            print(f"[AI] {ai_response}")
+            if self.on_japanese_text:
+                self.on_japanese_text(ai_response)
+
+            # ログ保存
+            self.logger.log("user", "ai", text, ai_response)
+
+            # 音声合成
+            self._notify_status("音声合成中...")
+            try:
+                audio_path = self.tts.synthesize(ai_response)
+                if audio_path:
+                    self.player.enqueue(audio_path)
+            except Exception as e:
+                print(f"[Chat] TTS エラー: {e}")
+
+            self._notify_status("マイク待機中..." if self._running else "停止中")
+
+        threading.Thread(target=_process, daemon=True).start()
 
     def _notify_status(self, status: str):
         if self.on_status_change:
@@ -326,6 +526,9 @@ def run_cli(args):
         use_voicevox=use_voicevox,
         voicevox_speaker_id=args.speaker_id if use_voicevox else 3,
         asr_engine=args.asr,
+        mode=args.mode,
+        ai_base_url=args.ai_base_url,
+        ai_model=args.ai_model,
     )
 
     # Ctrl+C で停止
@@ -339,22 +542,49 @@ def run_cli(args):
     tts_name = "VOICEVOX" if use_voicevox else "Edge TTS"
     os_name = "Windows (WASAPI)" if IS_WINDOWS else "macOS (BlackHole)"
     asr_name = "Moonshine" if args.asr == "moonshine" else f"faster-whisper ({args.model})"
+    mode_name = "AI チャット" if args.mode == "chat" else "翻訳"
     print("=" * 50)
-    print("  Voice Bridge - CLI モード")
+    print(f"  Voice Bridge - CLI モード（{mode_name}）")
     print(f"  OS: {os_name}")
     print(f"  ASR: {asr_name}")
+    if args.mode == "chat":
+        print(f"  AI: {args.ai_model}")
     print(f"  デバイス: {args.device}")
     print(f"  TTS: {tts_name}")
     print(f"  チャンク: {args.chunk}秒")
     print("  Ctrl+C で停止")
     print("=" * 50)
 
+    # CLI 音声レベル表示
+    def on_cli_level(rms: float, is_active: bool):
+        bar_len = int(min(rms * 200, 30))
+        bar = "█" * bar_len + "░" * (30 - bar_len)
+        marker = " 🎤" if is_active else ""
+        print(f"\r  [{bar}] {rms:.3f}{marker}  ", end="", flush=True)
+
+    bridge.on_level = on_cli_level
+
     bridge.start()
+
+    # チャットモードではテキスト入力も受け付ける
+    if args.mode == "chat":
+        print("  テキスト入力も可能です（Enter で送信）")
+        print("=" * 50)
 
     # メインスレッドを生かしておく
     try:
-        while True:
-            time.sleep(0.5)
+        if args.mode == "chat":
+            # チャットモード: テキスト入力も受け付ける
+            while True:
+                try:
+                    user_input = input()
+                    if user_input.strip():
+                        bridge.chat_text(user_input.strip())
+                except EOFError:
+                    break
+        else:
+            while True:
+                time.sleep(0.5)
     except KeyboardInterrupt:
         bridge.stop()
 
@@ -392,6 +622,9 @@ def run_gui(args):
         use_voicevox=voicevox_available,
         voicevox_speaker_id=default_speaker_id,
         asr_engine=args.asr,
+        mode=args.mode,
+        ai_base_url=args.ai_base_url,
+        ai_model=args.ai_model,
     )
 
     # 声変更のコールバック
@@ -481,7 +714,21 @@ def main():
                         help="VOICEVOX speaker ID (default: 3 = ずんだもん)")
     parser.add_argument("--chunk", type=float, default=4.0, help="音声チャンク長（秒）")
 
+    # AI チャットモード
+    parser.add_argument("--mode", default="translate", choices=["translate", "chat"],
+                        help="動作モード: translate（翻訳）/ chat（AI会話）")
+    parser.add_argument("--ai-base-url", default=None,
+                        help="AI API ベース URL (default: .env の AI_BASE_URL or OpenAI)")
+    parser.add_argument("--ai-model", default=None,
+                        help="AI モデル名 (default: .env の AI_MODEL or gpt-4o-mini)")
+
     args = parser.parse_args()
+
+    # .env / 環境変数からデフォルト値を補完
+    if args.ai_base_url is None:
+        args.ai_base_url = os.environ.get("AI_BASE_URL", "https://api.openai.com/v1")
+    if args.ai_model is None:
+        args.ai_model = os.environ.get("AI_MODEL", "gpt-4o-mini")
 
     if args.list_devices:
         print("利用可能な入力デバイス:")
