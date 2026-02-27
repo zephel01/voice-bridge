@@ -144,6 +144,13 @@ class VoicevoxTTS:
             print(f"[VoicevoxTTS] 音声合成エラー: {e}")
             return None
 
+    def set_language(self, language: str, voice: str = None) -> bool:
+        """言語を変更（VOICEVOX は日本語のみ対応）"""
+        if language == "ja":
+            return True
+        print(f"[VoicevoxTTS] 日本語以外 ({language}) は非対応")
+        return False
+
     def set_speaker(self, speaker_id: int):
         """話者を変更"""
         self.speaker_id = speaker_id
