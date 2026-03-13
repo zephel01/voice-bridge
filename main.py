@@ -939,7 +939,7 @@ def run_gui(args):
 
     # デフォルトの speaker_id
     default_speaker_id = 3  # VOICEVOX: ずんだもん ノーマル
-    default_coeiroink_id = 0  # CoeiroInk: リリンちゃん
+    default_coeiroink_id = 90  # CoeiroInk: リリンちゃん ノーマル（styleId=90）
 
     # ローカル LLM サーバーから利用可能なモデル一覧を取得
     ai_models = AiChat.fetch_models(base_url=args.ai_base_url)
