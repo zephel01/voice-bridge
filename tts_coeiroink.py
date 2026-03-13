@@ -16,17 +16,17 @@ import requests
 # デフォルトのキャラクター一覧（CoeiroInk エンジンから取得できない場合のフォールバック）
 # 形式: "キャラ名（スタイル）": "UUID:styleId"
 DEFAULT_SPEAKERS = {
-    "リリンちゃん": "cb11bdbd-78fc-4f16-b528-a400bae1782d:0",
+    "リリンちゃん（のーまる）": "cb11bdbd-78fc-4f16-b528-a400bae1782d:90",
 }
 
 
 class CoeiroinkTTS:
     """CoeiroInk エンジンを使った音声合成"""
 
-    def __init__(self, speaker_id: int = 0, speaker_uuid: str = None, host: str = None):
+    def __init__(self, speaker_id: int = 90, speaker_uuid: str = None, host: str = None):
         """
         Args:
-            speaker_id: スタイルID（デフォルト: 0 = ノーマル）
+            speaker_id: スタイルID（デフォルト: 90 = リリンちゃん・ノーマル）
             speaker_uuid: キャラクター UUID（デフォルト: リリンちゃん）
             host: CoeiroInk エンジンの URL (デフォルト: 環境変数 COEIROINK_HOST or http://localhost:50031)
         """
