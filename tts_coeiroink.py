@@ -16,7 +16,7 @@ import requests
 # デフォルトのキャラクター一覧（CoeiroInk エンジンから取得できない場合のフォールバック）
 # 形式: "キャラ名（スタイル）": "UUID:styleId"
 DEFAULT_SPEAKERS = {
-    "リリンちゃん": "3c37646f-3881-5374-2a83-149267990abc:0",
+    "リリンちゃん": "cb11bdbd-78fc-4f16-b528-a400bae1782d:0",
 }
 
 
@@ -34,7 +34,7 @@ class CoeiroinkTTS:
         if host is None:
             host = os.environ.get("COEIROINK_HOST", "http://localhost:50031")
         self.speaker_id = speaker_id
-        self.speaker_uuid = speaker_uuid or "3c37646f-3881-5374-2a83-149267990abc"  # デフォルト: リリンちゃん
+        self.speaker_uuid = speaker_uuid or "cb11bdbd-78fc-4f16-b528-a400bae1782d"  # デフォルト: リリンちゃん
         self.host = host
         self._temp_dir = tempfile.mkdtemp(prefix="voice_bridge_ci_")
         self._counter = 0
