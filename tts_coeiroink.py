@@ -61,14 +61,16 @@ class CoeiroinkTTS:
         result = {}
         for speaker in speakers:
             name = speaker.get("name", "Unknown")
+            speaker_uuid = speaker.get("uuid", "")
             for style in speaker.get("styles", []):
                 style_name = style.get("name", "")
-                sid = style.get("id", 0)
+                style_id = style.get("id", 0)
                 if style_name == "ノーマル" or style_name == name or not style_name:
                     label = name
                 else:
                     label = f"{name}（{style_name}）"
-                result[label] = sid
+                # キャラクター情報を保存（uuid:style_id の形式）
+                result[label] = f"{speaker_uuid}:{style_id}"
         return result
 
     @staticmethod
@@ -111,10 +113,26 @@ class CoeiroinkTTS:
 
         try:
             # CoeiroInk API: /v1/synthesis で音声合成
+            # リリンちゃんの speakerUuid（デフォルト）
+            speaker_uuid = "3c37646f-3881-5374-2a83-149267990abc"
+
+            payload = {
+                "text": text.strip(),
+                "speakerUuid": speaker_uuid,
+                "styleId": self.speaker_id,
+                "speedScale": 1.0,
+                "volumeScale": 1.0,
+                "pitchScale": 0.0,
+                "intonationScale": 1.0,
+                "prePhonemeLength": 0.0,
+                "postPhonemeLength": 0.0,
+                "outputSamplingRate": 44100,
+            }
+
             resp = requests.post(
                 f"{self.host}/v1/synthesis",
-                params={"speaker": self.speaker_id},
-                json={"text": text.strip()},
+                json=payload,
+                headers={"Accept": "audio/wav"},
                 timeout=30,
             )
             resp.raise_for_status()
