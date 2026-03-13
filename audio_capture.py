@@ -1,6 +1,11 @@
 """
 音声キャプチャモジュール
 BlackHole経由でmacOSのシステム音声をキャプチャする
+
+VAD（Voice Activity Detection）モード:
+  Silero VAD を使い、発話の開始・終了をニューラルネットで検出。
+  チャットモードでは発話単位でキューに投入し、
+  固定チャンクサイズに依存しない自然な発話区切りを実現する。
 """
 
 import threading
@@ -21,7 +26,13 @@ class AudioCapture:
         device_name: str = "BlackHole 2ch",
         sample_rate: int = 16000,
         chunk_duration: float = 4.0,
-        silence_threshold: float = 0.03,  # 改善：0.01 → 0.03（より明確な音声検出）
+        silence_threshold: float = 0.03,
+        # --- VAD 設定 ---
+        use_vad: bool = False,
+        vad_threshold: float = 0.5,
+        vad_hold_ms: int = 800,        # 発話終了判定の無音保持時間 (ms)
+        vad_max_duration: float = 30.0, # 最大発話長（秒）— 安全リミット
+        vad_min_duration: float = 0.3,  # 最小発話長（秒）— 短すぎるノイズを除外
     ):
         self.device_name = device_name
         self.sample_rate = sample_rate
@@ -37,8 +48,41 @@ class AudioCapture:
 
         self.chunk_samples = int(sample_rate * chunk_duration)
 
-        # RMS レベルコールバック (rms: float, is_above_threshold: bool)
+        # レベルコールバック (rms: float, is_active: bool)
         self.on_level = None
+
+        # 生オーディオコールバック (audio_data: np.ndarray)
+        # ストリーミング ASR 用: 全ブロックをそのまま渡す
+        self.on_audio = None
+
+        # --- VAD ---
+        self.use_vad = use_vad
+        self._vad = None
+        self._vad_threshold = vad_threshold
+
+        if use_vad:
+            from vad import SileroVAD
+            self._vad = SileroVAD(threshold=vad_threshold, sample_rate=sample_rate)
+            self._vad.load()
+
+            # VAD ブロックは 100ms (1600 samples @ 16kHz)
+            self._vad_block_duration = 0.1
+            self._vad_block_samples = int(sample_rate * self._vad_block_duration)
+
+            # 発話終了判定: 無音が hold_frames 回続いたら発話終了
+            self._vad_hold_frames = max(1, int(vad_hold_ms / (self._vad_block_duration * 1000)))
+            self._vad_max_samples = int(vad_max_duration * sample_rate)
+            self._vad_min_samples = int(vad_min_duration * sample_rate)
+
+            # VAD 状態
+            self._speech_active = False
+            self._speech_buffer: list = []
+            self._speech_buffer_samples = 0
+            self._silence_frame_count = 0
+
+            print(f"[AudioCapture] VAD: threshold={vad_threshold}, "
+                  f"hold={vad_hold_ms}ms ({self._vad_hold_frames}frames), "
+                  f"min={vad_min_duration}s, max={vad_max_duration}s")
 
     @staticmethod
     def list_devices() -> list[dict]:
@@ -63,21 +107,37 @@ class AudioCapture:
                 return i
         return None
 
+    # ===== コールバック =====
+
     def _audio_callback(self, indata, frames, time_info, status):
-        """sounddevice のコールバック。音声データをバッファに追加"""
+        """sounddevice のコールバック。モードに応じて処理を分岐"""
         if status:
             print(f"[AudioCapture] Status: {status}")
 
         audio_data = indata[:, 0].copy()  # モノラルに変換
+
+        # 生オーディオを外部に通知（ストリーミング ASR 用）
+        if self.on_audio:
+            try:
+                self.on_audio(audio_data)
+            except Exception:
+                pass  # コールバックのエラーでキャプチャを止めない
+
+        if self.use_vad:
+            self._vad_callback(audio_data)
+        else:
+            self._rms_callback(audio_data)
+
+    def _rms_callback(self, audio_data):
+        """従来の RMS ベース処理（固定チャンク + RMS 閾値）"""
         self._buffer.append(audio_data)
         self._buffer_samples += len(audio_data)
 
         # チャンクサイズに達したらキューに投入
         if self._buffer_samples >= self.chunk_samples:
             chunk = np.concatenate(self._buffer)
-            # チャンクサイズ分だけ取り出す
             audio_chunk = chunk[: self.chunk_samples]
-            remaining = chunk[self.chunk_samples :]
+            remaining = chunk[self.chunk_samples:]
 
             # 無音チェック: RMS が閾値以上ならキューに追加
             rms = np.sqrt(np.mean(audio_chunk**2))
@@ -89,6 +149,60 @@ class AudioCapture:
             # 残りをバッファに戻す
             self._buffer = [remaining] if len(remaining) > 0 else []
             self._buffer_samples = len(remaining)
+
+    def _vad_callback(self, audio_data):
+        """VAD ベースの発話検出処理（発話単位でキューに投入）"""
+        is_speech = self._vad.is_speech(audio_data)
+
+        # RMS も計算（レベルメーター表示用）
+        rms = np.sqrt(np.mean(audio_data**2))
+        if self.on_level:
+            self.on_level(rms, is_speech)
+
+        if is_speech:
+            # 音声あり → バッファに追加
+            self._speech_active = True
+            self._silence_frame_count = 0
+            self._speech_buffer.append(audio_data)
+            self._speech_buffer_samples += len(audio_data)
+
+            # 最大長チェック（安全リミット）
+            if self._speech_buffer_samples >= self._vad_max_samples:
+                print(f"[VAD] 最大長到達 ({self._vad_max_samples / self.sample_rate:.0f}s)")
+                self._emit_utterance()
+
+        else:
+            if self._speech_active:
+                # 音声なし + 発話中 → 無音フレームをカウント
+                # 自然さのために無音部分もバッファに含める
+                self._speech_buffer.append(audio_data)
+                self._speech_buffer_samples += len(audio_data)
+                self._silence_frame_count += 1
+
+                if self._silence_frame_count >= self._vad_hold_frames:
+                    # 無音が十分続いた → 発話終了
+                    self._emit_utterance()
+
+    def _emit_utterance(self):
+        """バッファに溜まった発話音声をキューに投入"""
+        if self._speech_buffer_samples < self._vad_min_samples:
+            # 短すぎる音声は無視（咳やクリック音など）
+            duration = self._speech_buffer_samples / self.sample_rate
+            print(f"[VAD] 短い音声をスキップ ({duration:.2f}s < {self._vad_min_samples / self.sample_rate:.1f}s)")
+        else:
+            utterance = np.concatenate(self._speech_buffer)
+            duration = len(utterance) / self.sample_rate
+            print(f"[VAD] 発話検出 ({duration:.1f}s)")
+            self.audio_queue.put(utterance)
+
+        # 状態リセット
+        self._speech_buffer = []
+        self._speech_buffer_samples = 0
+        self._speech_active = False
+        self._silence_frame_count = 0
+        self._vad.reset()
+
+    # ===== 制御 =====
 
     def start(self):
         """音声キャプチャを開始"""
@@ -106,15 +220,29 @@ class AudioCapture:
         self._buffer = []
         self._buffer_samples = 0
 
+        # VAD 状態をリセット
+        if self.use_vad:
+            self._speech_buffer = []
+            self._speech_buffer_samples = 0
+            self._speech_active = False
+            self._silence_frame_count = 0
+            self._vad.reset()
+
+        # VAD モードでは 100ms ブロック（細かい粒度で検出）
+        # 通常モードでは 0.5s ブロック
+        block_duration = self._vad_block_duration if self.use_vad else 0.5
+
         self._stream = sd.InputStream(
             device=device_index,
             channels=1,
             samplerate=self.sample_rate,
-            blocksize=int(self.sample_rate * 0.5),  # 0.5秒ごとにコールバック
+            blocksize=int(self.sample_rate * block_duration),
             callback=self._audio_callback,
         )
         self._stream.start()
-        print(f"[AudioCapture] キャプチャ開始: {self.device_name} (index={device_index})")
+        mode = "VAD" if self.use_vad else "RMS"
+        print(f"[AudioCapture] キャプチャ開始: {self.device_name} "
+              f"(index={device_index}, mode={mode}, block={block_duration}s)")
 
     def stop(self):
         """音声キャプチャを停止"""
@@ -123,14 +251,24 @@ class AudioCapture:
             self._stream.stop()
             self._stream.close()
             self._stream = None
-        # 残りのバッファをフラッシュ
-        if self._buffer:
-            chunk = np.concatenate(self._buffer)
-            rms = np.sqrt(np.mean(chunk**2))
-            if rms > self.silence_threshold and len(chunk) > self.sample_rate * 0.5:
-                self.audio_queue.put(chunk)
-            self._buffer = []
-            self._buffer_samples = 0
+
+        if self.use_vad:
+            # VAD: 残りの発話をフラッシュ
+            if self._speech_buffer and self._speech_buffer_samples >= self._vad_min_samples:
+                utterance = np.concatenate(self._speech_buffer)
+                self.audio_queue.put(utterance)
+            self._speech_buffer = []
+            self._speech_buffer_samples = 0
+        else:
+            # RMS: 残りのバッファをフラッシュ
+            if self._buffer:
+                chunk = np.concatenate(self._buffer)
+                rms = np.sqrt(np.mean(chunk**2))
+                if rms > self.silence_threshold and len(chunk) > self.sample_rate * 0.5:
+                    self.audio_queue.put(chunk)
+                self._buffer = []
+                self._buffer_samples = 0
+
         print("[AudioCapture] キャプチャ停止")
 
     def get_chunk(self, timeout: float = 1.0) -> np.ndarray | None:

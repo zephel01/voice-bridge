@@ -13,6 +13,7 @@ YouTubeの英語音声をリアルタイムで日本語音声に翻訳する
 import argparse
 import os
 import platform
+import queue
 import sys
 import threading
 import signal
@@ -61,6 +62,7 @@ class VoiceBridge:
         ai_base_url: str = "https://api.openai.com/v1",
         ai_api_key: str = None,
         ai_model: str = "gpt-4o-mini",
+        use_vad: bool = False,
     ):
         # TTS言語はデフォルトで翻訳言語と同じ
         if tts_language is None:
@@ -71,10 +73,17 @@ class VoiceBridge:
         self.tts_language = tts_language
 
         self.asr_engine = asr_engine
+        self.use_vad = use_vad
+
+        # VAD はチャットモードでのみ有効（発話単位のセグメンテーション）
+        enable_vad = use_vad and mode == "chat"
         self.capture = AudioCapture(
             device_name=device_name,
             chunk_duration=chunk_duration,
+            use_vad=enable_vad,
         )
+        if enable_vad:
+            print(f"[VoiceBridge] VAD: Silero VAD（発話単位検出）")
 
         # ASR エンジンの選択
         if asr_engine == "moonshine":
@@ -123,6 +132,13 @@ class VoiceBridge:
         self._pipeline_thread = None
         self._is_playing = False  # TTS再生中フラグ（フィードバックループ防止）
 
+        # ストリーミング ASR（Moonshine + VAD 時に有効）
+        self._streaming_asr = None
+        self._streaming_lines = None  # queue.Queue for thread-safe line collection
+        self._streaming_partial = ""  # 途中経過テキスト
+        if enable_vad and asr_engine == "moonshine":
+            self._setup_streaming_asr()
+
         # GUI コールバック用
         self.on_english_text = None
         self.on_japanese_text = None
@@ -159,6 +175,64 @@ class VoiceBridge:
                 break
         self._is_playing = False
         print("[VoiceBridge] TTS再生終了 → キャプチャ再開")
+
+    def _setup_streaming_asr(self):
+        """ストリーミング ASR を初期化（Moonshine + VAD 時のみ）
+
+        AudioCapture の on_audio コールバック経由で 100ms ブロックを
+        StreamingTranscriber にリアルタイムで流す。
+        確定したテキスト行を _streaming_lines キューに蓄積し、
+        VAD が発話終了を検出した時点でまとめて取り出す。
+        """
+        from transcriber_moonshine import StreamingTranscriber
+
+        self._streaming_lines = queue.Queue()
+        self._streaming_partial = ""
+
+        def on_text(text, is_final):
+            """途中経過テキストを更新"""
+            if not is_final:
+                self._streaming_partial = text
+
+        def on_line_completed(text):
+            """確定テキストをキューに追加"""
+            if text.strip():
+                self._streaming_lines.put(text.strip())
+                self._streaming_partial = ""
+
+        self._streaming_asr = StreamingTranscriber(
+            language=self.source_language,
+            on_text=on_text,
+            on_line_completed=on_line_completed,
+        )
+
+        # AudioCapture の生オーディオをストリーミング ASR に接続
+        def on_audio(audio_data):
+            if self._streaming_asr and not self._is_playing:
+                self._streaming_asr.add_audio(audio_data, self.capture.sample_rate)
+
+        self.capture.on_audio = on_audio
+        print(f"[VoiceBridge] ストリーミング ASR: Moonshine (リアルタイム認識)")
+
+    def _collect_streaming_text(self) -> str:
+        """ストリーミング ASR の確定テキストをまとめて取得"""
+        lines = []
+        while not self._streaming_lines.empty():
+            try:
+                lines.append(self._streaming_lines.get_nowait())
+            except queue.Empty:
+                break
+
+        # 確定行 + 途中経過を結合
+        text = " ".join(lines)
+        if self._streaming_partial.strip():
+            if text:
+                text += " " + self._streaming_partial.strip()
+            else:
+                text = self._streaming_partial.strip()
+
+        self._streaming_partial = ""
+        return text
 
     def _notify_latency(self, latency: float, stage: str):
         """遅延情報を通知"""
@@ -259,12 +333,114 @@ class VoiceBridge:
             self._notify_status("キャプチャ中...")
 
     def _chat_pipeline_loop(self):
-        """AI チャットパイプラインループ（マイク入力）"""
+        """AI チャットパイプラインループ（VAD有無で分岐）"""
         print("")
         print("[1/4] モデルロード中...")
         self._notify_status("モデルロード中...")
-        self.transcriber.load_model()
-        print("[1/4] モデルロード完了 ✓")
+
+        # ストリーミング ASR がある場合はそちらをロード & 開始
+        if self._streaming_asr:
+            self._streaming_asr.load_model()
+            self._streaming_asr.start()
+            print("[1/4] ストリーミング ASR ロード完了 ✓")
+        else:
+            self.transcriber.load_model()
+            print("[1/4] モデルロード完了 ✓")
+
+        if self.use_vad:
+            self._chat_pipeline_vad()
+        else:
+            self._chat_pipeline_legacy()
+
+        # クリーンアップ
+        if self._streaming_asr:
+            self._streaming_asr.stop()
+
+    def _chat_pipeline_vad(self):
+        """VAD ベースのチャットパイプライン
+
+        AudioCapture が Silero VAD で発話の開始・終了を検出し、
+        完全な発話を1つのチャンクとしてキューに投入する。
+
+        ストリーミング ASR が有効な場合:
+          - AudioCapture の on_audio 経由で 100ms ブロックを
+            StreamingTranscriber にリアルタイムで流す
+          - VAD が発話終了を検出 → ストリーミングの確定テキストを使用
+          - バッチ ASR は不要（認識待ち時間がほぼゼロ）
+          - 話しながらリアルタイムでテキストが表示される
+
+        ストリーミング ASR が無効な場合:
+          - VAD が発話を検出 → バッチ ASR で一括認識
+        """
+        use_streaming = self._streaming_asr is not None
+        mode_str = "VAD + ストリーミング ASR" if use_streaming else "VAD"
+        print(f"[====] マイク待機中... 話しかけてください ({mode_str})")
+        self._notify_status("マイク待機中...")
+
+        while self._running:
+            # VAD が発話を検出してキューに入れるのを待つ
+            audio_chunk = self.capture.get_chunk(timeout=1.0)
+            if audio_chunk is None:
+                continue
+
+            # TTS 再生中はスキップ（フィードバックループ防止）
+            if self._is_playing:
+                # ストリーミング ASR のバッファもクリア
+                if use_streaming:
+                    self._collect_streaming_text()
+                continue
+
+            duration = len(audio_chunk) / self.capture.sample_rate
+
+            if use_streaming:
+                # ストリーミング ASR: 確定テキストを収集（認識は既にリアルタイムで完了）
+                print(f"\n[1/4] ストリーミング認識結果を取得中... ({duration:.1f}s)")
+                self._notify_status("認識中...")
+
+                # VAD 発話終了後、ストリーミングの処理が追いつくのを少し待つ
+                time.sleep(0.15)
+
+                t_step = time.time()
+                user_text = self._collect_streaming_text()
+                t_transcribe = time.time() - t_step
+
+                if not user_text.strip():
+                    # ストリーミングが空 → フォールバックでバッチ ASR
+                    print(f"[1/4] ストリーミング空 → バッチ ASR にフォールバック")
+                    try:
+                        self.transcriber.load_model()
+                        user_text = self.transcriber.transcribe(audio_chunk)
+                        t_transcribe = time.time() - t_step
+                    except Exception as e:
+                        print(f"[1/4] バッチ ASR エラー: {e}")
+                        self._notify_status("マイク待機中...")
+                        continue
+            else:
+                # バッチ ASR
+                print(f"\n[1/4] 音声認識中... ({duration:.1f}s)")
+                self._notify_status("認識中...")
+
+                t_step = time.time()
+                try:
+                    user_text = self.transcriber.transcribe(audio_chunk)
+                except Exception as e:
+                    print(f"[1/4] 音声認識エラー: {e}")
+                    self._notify_status("マイク待機中...")
+                    continue
+                t_transcribe = time.time() - t_step
+
+            if not user_text.strip():
+                print(f"[1/4] (空テキスト — スキップ)")
+                self._notify_status("マイク待機中...")
+                continue
+
+            print(f"[1/4] 認識完了 ({t_transcribe:.2f}s) ✓")
+
+            # AI に送信
+            self._chat_send_to_ai(user_text.strip())
+
+    def _chat_pipeline_legacy(self):
+        """従来のチャットパイプライン（VAD なし — 固定チャンク + 無音カウント方式）"""
         print("[====] マイク待機中... 話しかけてください")
         self._notify_status("マイク待機中...")
 
@@ -324,14 +500,102 @@ class VoiceBridge:
             self._notify_status(f"聞いてます... ({len(utterance_buffer)})")
 
     def _chat_send_to_ai(self, user_text: str):
-        """バッファに溜まったテキストをまとめてAIに送信"""
+        """バッファに溜まったテキストをまとめてAIに送信（ストリーミング / バッチ自動選択）"""
         t_start = time.time()
         print(f"[1/4] 認識完了 ✓")
         print(f"  YOU: {user_text}")
         if self.on_english_text:
             self.on_english_text(user_text)
 
-        # 3. AI に質問
+        # ストリーミング対応: 文単位で TTS に渡してダブルバッファリング
+        if self.use_vad:
+            self._chat_ai_streaming(user_text, t_start)
+        else:
+            self._chat_ai_batch(user_text, t_start)
+
+    def _chat_ai_streaming(self, user_text: str, t_start: float):
+        """ストリーミング応答 + 文単位 TTS パイプライン
+
+        LLM からトークン単位で応答を受信し、句点（。！？）で文を区切って
+        即座に TTS に渡す。再生キューに順次追加することで、
+        1文目を再生しながら2文目を合成する「ダブルバッファリング」を実現。
+
+        従来: AI全文待ち(3s) → TTS全文(1s) → 再生 = 4s後に音声開始
+        改善: AI1文目(0.5s) → TTS1文目(0.3s) → 再生開始 = 0.8s後に音声開始
+        """
+        print(f"[2/4] AI 応答待ち (streaming, {self.ai_chat.model})...")
+        self._notify_status("AI 応答中...")
+
+        # 文の区切り文字
+        SENTENCE_ENDINGS = frozenset("。！？!?\n")
+
+        sentence_buffer = ""
+        full_response = ""
+        sentence_count = 0
+        t_first_audio = None
+        t_tts_total = 0.0
+
+        try:
+            for delta in self.ai_chat.chat_stream(user_text):
+                full_response += delta
+                sentence_buffer += delta
+
+                # 文末を検出したら即座に TTS に渡す
+                last_char = sentence_buffer.rstrip()[-1] if sentence_buffer.strip() else ""
+                if last_char in SENTENCE_ENDINGS:
+                    sentence = sentence_buffer.strip()
+                    if sentence:
+                        sentence_count += 1
+                        t_tts_step = time.time()
+                        self._synthesize_and_enqueue(sentence, sentence_count)
+                        t_tts_total += time.time() - t_tts_step
+
+                        if t_first_audio is None:
+                            t_first_audio = time.time() - t_start
+                            print(f"[2/4] 初回音声キュー投入 ({t_first_audio:.2f}s)")
+
+                    sentence_buffer = ""
+
+        except Exception as e:
+            print(f"[2/4] ストリーミングエラー: {e}")
+
+        # 残りのバッファ（文末記号なしで終わった場合）
+        if sentence_buffer.strip():
+            sentence_count += 1
+            t_tts_step = time.time()
+            self._synthesize_and_enqueue(sentence_buffer.strip(), sentence_count)
+            t_tts_total += time.time() - t_tts_step
+            if t_first_audio is None:
+                t_first_audio = time.time() - t_start
+
+        # 結果表示 & ログ
+        if full_response.strip():
+            print(f"  AI:  {full_response.strip()}")
+            if self.on_japanese_text:
+                self.on_japanese_text(full_response.strip())
+
+            self.logger.log("user", "ai", user_text, full_response.strip())
+
+        t_total = time.time() - t_start
+        first_str = f", 初回音声={t_first_audio:.2f}s" if t_first_audio else ""
+        print(f"[====] 合計 {t_total:.1f}s ({sentence_count}文, TTS計{t_tts_total:.1f}s{first_str})")
+        self._notify_latency(t_total, f"{sentence_count}文, 初回{t_first_audio:.1f}s" if t_first_audio else f"{t_total:.1f}s")
+
+        print("[====] マイク待機中... 話しかけてください")
+        self._notify_status("マイク待機中...")
+
+    def _synthesize_and_enqueue(self, text: str, index: int):
+        """テキストを TTS で音声合成し、再生キューに追加"""
+        try:
+            audio_path = self.tts.synthesize(text)
+            if audio_path:
+                self.player.enqueue(audio_path)
+                print(f"  [TTS #{index}] \"{text[:30]}{'...' if len(text) > 30 else ''}\"")
+        except Exception as e:
+            print(f"  [TTS #{index}] エラー: {e}")
+
+    def _chat_ai_batch(self, user_text: str, t_start: float):
+        """従来のバッチ応答（ストリーミングなし）"""
         print(f"[2/4] AI 応答待ち ({self.ai_chat.model})...")
         self._notify_status("AI 応答中...")
         t_step = time.time()
@@ -353,14 +617,9 @@ class VoiceBridge:
             self.on_japanese_text(ai_response)
 
         # ログ保存
-        print("[3/4] ログ保存中...")
-        self.logger.log(
-            "user", "ai",
-            user_text, ai_response,
-        )
-        print("[3/4] ログ保存完了 ✓")
+        self.logger.log("user", "ai", user_text, ai_response)
 
-        # 4. 音声合成（ずんだもん等で読み上げ）
+        # 音声合成
         print("[4/4] 音声合成中...")
         self._notify_status("音声合成中...")
         t_step = time.time()
@@ -375,10 +634,8 @@ class VoiceBridge:
             self.player.enqueue(audio_path)
 
         t_total = time.time() - t_start
-        print(f"[4/4] 音声合成完了 ({t_tts:.1f}s) ✓")
         print(f"[====] 合計 {t_total:.1f}s (AI{t_ai:.1f}s + TTS{t_tts:.1f}s)")
-        self._notify_latency(t_total,
-            f"AI{t_ai:.1f}s+TTS{t_tts:.1f}s")
+        self._notify_latency(t_total, f"AI{t_ai:.1f}s+TTS{t_tts:.1f}s")
 
         print("[====] マイク待機中... 話しかけてください")
         self._notify_status("マイク待機中...")
@@ -394,6 +651,44 @@ class VoiceBridge:
                 self.on_english_text(text)
 
             self._notify_status("AI 応答中...")
+
+            if self.use_vad:
+                # ストリーミング + 文単位 TTS
+                SENTENCE_ENDINGS = frozenset("。！？!?\n")
+                sentence_buffer = ""
+                full_response = ""
+                sentence_count = 0
+
+                try:
+                    for delta in self.ai_chat.chat_stream(text):
+                        full_response += delta
+                        sentence_buffer += delta
+
+                        last_char = sentence_buffer.rstrip()[-1] if sentence_buffer.strip() else ""
+                        if last_char in SENTENCE_ENDINGS:
+                            sentence = sentence_buffer.strip()
+                            if sentence:
+                                sentence_count += 1
+                                self._synthesize_and_enqueue(sentence, sentence_count)
+                            sentence_buffer = ""
+
+                    if sentence_buffer.strip():
+                        sentence_count += 1
+                        self._synthesize_and_enqueue(sentence_buffer.strip(), sentence_count)
+
+                except Exception as e:
+                    print(f"[Chat] AI ストリーミングエラー: {e}")
+
+                if full_response.strip():
+                    print(f"[AI] {full_response.strip()}")
+                    if self.on_japanese_text:
+                        self.on_japanese_text(full_response.strip())
+                    self.logger.log("user", "ai", text, full_response.strip())
+
+                self._notify_status("マイク待機中..." if self._running else "停止中")
+                return
+
+            # 従来のバッチ処理
             try:
                 ai_response = self.ai_chat.chat(text)
             except Exception as e:
@@ -529,6 +824,7 @@ def run_cli(args):
         mode=args.mode,
         ai_base_url=args.ai_base_url,
         ai_model=args.ai_model,
+        use_vad=args.vad,
     )
 
     # Ctrl+C で停止
@@ -543,15 +839,18 @@ def run_cli(args):
     os_name = "Windows (WASAPI)" if IS_WINDOWS else "macOS (BlackHole)"
     asr_name = "Moonshine" if args.asr == "moonshine" else f"faster-whisper ({args.model})"
     mode_name = "AI チャット" if args.mode == "chat" else "翻訳"
+    vad_name = "Silero VAD" if args.vad and args.mode == "chat" else "RMS"
     print("=" * 50)
     print(f"  Voice Bridge - CLI モード（{mode_name}）")
     print(f"  OS: {os_name}")
     print(f"  ASR: {asr_name}")
     if args.mode == "chat":
         print(f"  AI: {args.ai_model}")
+        print(f"  VAD: {vad_name}")
     print(f"  デバイス: {args.device}")
     print(f"  TTS: {tts_name}")
-    print(f"  チャンク: {args.chunk}秒")
+    if not (args.vad and args.mode == "chat"):
+        print(f"  チャンク: {args.chunk}秒")
     print("  Ctrl+C で停止")
     print("=" * 50)
 
@@ -611,24 +910,73 @@ def run_gui(args):
     # デフォルトの speaker_id（ずんだもん ノーマル）
     default_speaker_id = 3
 
-    bridge = VoiceBridge(
-        device_name=args.device,
-        model_size=args.model,
-        source_language=args.source_lang,
-        target_language=args.target_lang,
-        tts_language=args.tts_lang,
-        voice=args.voice,
-        chunk_duration=args.chunk,
-        use_voicevox=voicevox_available,
-        voicevox_speaker_id=default_speaker_id,
-        asr_engine=args.asr,
-        mode=args.mode,
-        ai_base_url=args.ai_base_url,
-        ai_model=args.ai_model,
-    )
+    # ローカル LLM サーバーから利用可能なモデル一覧を取得
+    ai_models = AiChat.fetch_models(base_url=args.ai_base_url)
+    if ai_models:
+        print(f"[VoiceBridge] LLM モデル: {len(ai_models)} 件検出")
+    else:
+        print(f"[VoiceBridge] LLM モデル一覧取得失敗（サーバー未起動？）")
+
+    # VoiceBridge は開始時に GUI 設定を読んで作成する（遅延作成）
+    bridge_holder = {"bridge": None}
+
+    def create_bridge():
+        """GUI の現在の設定で VoiceBridge を作成"""
+        settings = gui.get_settings()
+        mode = settings["mode"]
+        asr = settings["asr"]
+        vad = settings["vad"]
+
+        bridge = VoiceBridge(
+            device_name=settings["device"],
+            model_size=args.model,
+            source_language=settings["source_lang"],
+            target_language=settings["target_lang"],
+            tts_language=settings["target_lang"],
+            voice=args.voice,
+            chunk_duration=args.chunk,
+            use_voicevox=voicevox_available,
+            voicevox_speaker_id=default_speaker_id,
+            asr_engine=asr,
+            mode=mode,
+            ai_base_url=args.ai_base_url,
+            ai_model=settings.get("ai_model") or args.ai_model,
+            use_vad=vad,
+        )
+
+        # GUI コールバックを接続
+        bridge.on_english_text = gui.add_english_text
+        bridge.on_japanese_text = gui.add_japanese_text
+        bridge.on_status_change = gui.set_status
+        bridge.on_level = gui.set_level
+        bridge.on_latency = gui.set_latency
+
+        bridge_holder["bridge"] = bridge
+        return bridge
+
+    def on_start():
+        """開始ボタン — VoiceBridge を（再）作成して開始"""
+        # 既存の bridge があれば停止
+        if bridge_holder["bridge"]:
+            try:
+                bridge_holder["bridge"].stop()
+            except Exception:
+                pass
+
+        bridge = create_bridge()
+        bridge.start()
+
+    def on_stop():
+        """停止ボタン"""
+        if bridge_holder["bridge"]:
+            bridge_holder["bridge"].stop()
+            bridge_holder["bridge"] = None
 
     # 声変更のコールバック
     def on_voice_change(voice_key: str):
+        bridge = bridge_holder["bridge"]
+        if not bridge:
+            return
         if voicevox_available:
             sid = voicevox_speakers.get(voice_key)
             if sid is not None:
@@ -643,24 +991,24 @@ def run_gui(args):
 
     # 言語ペア変更のコールバック
     def on_language_pair_change(source: str, target: str):
-        bridge.change_language_pair(source, target)
+        if bridge_holder["bridge"]:
+            bridge_holder["bridge"].change_language_pair(source, target)
+
+    # チャットテキスト送信のコールバック
+    def on_chat_text(text: str):
+        if bridge_holder["bridge"]:
+            bridge_holder["bridge"].chat_text(text)
 
     gui = VoiceBridgeGUI(
-        on_start=bridge.start,
-        on_stop=bridge.stop,
+        on_start=on_start,
+        on_stop=on_stop,
         on_clear=None,
-        on_model_change=bridge.change_model,
-        on_device_change=bridge.change_device,
+        on_model_change=lambda m: bridge_holder["bridge"] and bridge_holder["bridge"].change_model(m),
+        on_device_change=lambda d: bridge_holder["bridge"] and bridge_holder["bridge"].change_device(d),
         on_voice_change=on_voice_change,
         on_language_pair_change=on_language_pair_change,
+        on_chat_text=on_chat_text,
     )
-
-    # GUI にテキストを表示するコールバック
-    bridge.on_english_text = gui.add_english_text
-    bridge.on_japanese_text = gui.add_japanese_text
-    bridge.on_status_change = gui.set_status
-    bridge.on_level = gui.set_level
-    bridge.on_latency = gui.set_latency
 
     # 声のリストを構築
     if voicevox_available:
@@ -676,6 +1024,11 @@ def run_gui(args):
         default_voice=default_voice,
         default_source_lang=args.source_lang,
         default_target_lang=args.target_lang,
+        default_mode=args.mode,
+        default_asr=args.asr,
+        default_vad=args.vad,
+        ai_models=ai_models,
+        default_ai_model=args.ai_model,
     )
 
     # VOICEVOX 利用表記（利用規約に基づくクレジット表記）
@@ -713,6 +1066,10 @@ def main():
     parser.add_argument("--speaker-id", type=int, default=3,
                         help="VOICEVOX speaker ID (default: 3 = ずんだもん)")
     parser.add_argument("--chunk", type=float, default=4.0, help="音声チャンク長（秒）")
+
+    # VAD (Voice Activity Detection)
+    parser.add_argument("--vad", action="store_true",
+                        help="Silero VAD を使用（チャットモードで発話検出を改善）")
 
     # AI チャットモード
     parser.add_argument("--mode", default="translate", choices=["translate", "chat"],

@@ -6,3 +6,4 @@ PyAudioWPatch; sys_platform == 'win32'
 pygame
 numpy
 requests
+torch

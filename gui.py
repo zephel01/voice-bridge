@@ -34,7 +34,7 @@ class VoiceBridgeGUI:
         "ko": "ko (韓国語)",
     }
 
-    def __init__(self, on_start=None, on_stop=None, on_clear=None, on_model_change=None, on_device_change=None, on_voice_change=None, on_rate_change=None, on_language_pair_change=None):
+    def __init__(self, on_start=None, on_stop=None, on_clear=None, on_model_change=None, on_device_change=None, on_voice_change=None, on_rate_change=None, on_language_pair_change=None, on_chat_text=None):
         """
         Args:
             on_start: 開始ボタン押下時のコールバック
@@ -45,6 +45,7 @@ class VoiceBridgeGUI:
             on_voice_change: 音声変更時のコールバック (voice: str)
             on_rate_change: 速度変更時のコールバック (rate: str)
             on_language_pair_change: 言語ペア変更時のコールバック (source: str, target: str)
+            on_chat_text: チャットテキスト送信時のコールバック (text: str)
         """
         self.on_start = on_start
         self.on_stop = on_stop
@@ -54,6 +55,7 @@ class VoiceBridgeGUI:
         self.on_voice_change = on_voice_change
         self.on_rate_change = on_rate_change
         self.on_language_pair_change = on_language_pair_change
+        self.on_chat_text = on_chat_text
 
         self._message_queue: queue.Queue = queue.Queue()
         self._running = False
@@ -63,7 +65,7 @@ class VoiceBridgeGUI:
         self._source_lang_label = None  # ソース言語のテキストボックスラベル
         self._target_lang_label = None  # ターゲット言語のテキストボックスラベル
 
-    def build(self, devices: list[str] = None, voices: list[str] = None, default_voice: str = None, default_source_lang: str = "en", default_target_lang: str = "ja"):
+    def build(self, devices: list[str] = None, voices: list[str] = None, default_voice: str = None, default_source_lang: str = "en", default_target_lang: str = "ja", default_mode: str = "translate", default_asr: str = "whisper", default_vad: bool = False, ai_models: list[str] = None, default_ai_model: str = ""):
         """GUI を構築"""
         self.root = tk.Tk()
         self.root.title("Voice Bridge - リアルタイム多言語翻訳")
@@ -124,32 +126,78 @@ class VoiceBridgeGUI:
         voice_combo.bind("<<ComboboxSelected>>", self._on_voice_changed)
 
         # 言語選択（3行目に配置）
-        ttk.Label(settings_frame, text="言語:").grid(row=2, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
+        lang_label_text = "会話言語:" if default_mode == "chat" else "言語:"
+        self._lang_label = ttk.Label(settings_frame, text=lang_label_text)
+        self._lang_label.grid(row=2, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
 
         # ソース言語選択
         self.source_lang_var = tk.StringVar(value=default_source_lang)
         source_lang_dropdown_values = [self.LANGUAGE_DROPDOWN[lang] for lang in ["en", "ja", "zh", "es", "fr", "de", "ko"]]
-        source_lang_combo = ttk.Combobox(
+        self._source_lang_combo = ttk.Combobox(
             settings_frame, textvariable=self.source_lang_var,
             values=source_lang_dropdown_values, width=15, state="readonly"
         )
-        source_lang_combo.set(self.LANGUAGE_DROPDOWN[default_source_lang])
-        source_lang_combo.grid(row=2, column=1, sticky=tk.W, pady=(8, 0))
-        source_lang_combo.bind("<<ComboboxSelected>>", self._on_language_pair_changed)
+        self._source_lang_combo.set(self.LANGUAGE_DROPDOWN[default_source_lang])
+        self._source_lang_combo.grid(row=2, column=1, sticky=tk.W, pady=(8, 0))
+        self._source_lang_combo.bind("<<ComboboxSelected>>", self._on_language_pair_changed)
 
         # ↔ 矢印ラベル
-        ttk.Label(settings_frame, text="↔").grid(row=2, column=2, padx=5, pady=(8, 0))
+        self._lang_arrow = ttk.Label(settings_frame, text="↔")
+        self._lang_arrow.grid(row=2, column=2, padx=5, pady=(8, 0))
 
         # ターゲット言語選択
         self.target_lang_var = tk.StringVar(value=default_target_lang)
         target_lang_dropdown_values = [self.LANGUAGE_DROPDOWN[lang] for lang in ["en", "ja", "zh", "es", "fr", "de", "ko"]]
-        target_lang_combo = ttk.Combobox(
+        self._target_lang_combo = ttk.Combobox(
             settings_frame, textvariable=self.target_lang_var,
             values=target_lang_dropdown_values, width=15, state="readonly"
         )
-        target_lang_combo.set(self.LANGUAGE_DROPDOWN[default_target_lang])
-        target_lang_combo.grid(row=2, column=3, sticky=tk.W, pady=(8, 0))
-        target_lang_combo.bind("<<ComboboxSelected>>", self._on_language_pair_changed)
+        self._target_lang_combo.set(self.LANGUAGE_DROPDOWN[default_target_lang])
+        self._target_lang_combo.grid(row=2, column=3, sticky=tk.W, pady=(8, 0))
+        self._target_lang_combo.bind("<<ComboboxSelected>>", self._on_language_pair_changed)
+
+        # チャットモードではソース言語を非表示にして、ターゲット言語 = 会話言語
+        if default_mode == "chat":
+            self._source_lang_combo.set(self.LANGUAGE_DROPDOWN[default_target_lang])
+            self._source_lang_combo.grid_remove()
+            self._lang_arrow.grid_remove()
+
+        # モード・ASR・VAD 選択（4行目に配置）
+        ttk.Label(settings_frame, text="モード:").grid(row=3, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
+        self.mode_var = tk.StringVar(value=default_mode)
+        mode_combo = ttk.Combobox(
+            settings_frame, textvariable=self.mode_var,
+            values=["translate", "chat"], width=10, state="readonly"
+        )
+        mode_combo.grid(row=3, column=1, sticky=tk.W, pady=(8, 0))
+        mode_combo.bind("<<ComboboxSelected>>", self._on_mode_changed)
+
+        ttk.Label(settings_frame, text="ASR:").grid(row=3, column=2, sticky=tk.W, padx=(0, 8), pady=(8, 0))
+        self.asr_var = tk.StringVar(value=default_asr)
+        asr_combo = ttk.Combobox(
+            settings_frame, textvariable=self.asr_var,
+            values=["whisper", "moonshine"], width=12, state="readonly"
+        )
+        asr_combo.grid(row=3, column=3, sticky=tk.W, pady=(8, 0))
+
+        self.vad_var = tk.BooleanVar(value=default_vad)
+        self._vad_check = tk.Checkbutton(
+            settings_frame, text="VAD", variable=self.vad_var,
+            bg="#1e1e2e", fg="#cdd6f4", selectcolor="#313244",
+            activebackground="#1e1e2e", activeforeground="#cdd6f4",
+            font=("Helvetica", 11)
+        )
+        self._vad_check.grid(row=3, column=4, sticky=tk.W, padx=(10, 0), pady=(8, 0))
+
+        # LLM モデル選択（5行目に配置）
+        ttk.Label(settings_frame, text="LLM:").grid(row=4, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
+        model_list = ai_models or []
+        self.ai_model_var = tk.StringVar(value=default_ai_model)
+        self._ai_model_combo = ttk.Combobox(
+            settings_frame, textvariable=self.ai_model_var,
+            values=model_list, width=40,
+        )
+        self._ai_model_combo.grid(row=4, column=1, columnspan=4, sticky=tk.W, pady=(8, 0))
 
         # --- ボタンエリア ---
         btn_frame = ttk.Frame(main_frame)
@@ -209,7 +257,8 @@ class VoiceBridgeGUI:
                   font=("Helvetica", 9), foreground="#a6adc8").pack(side=tk.LEFT)
 
         # --- ソース言語テキスト表示（動的に更新） ---
-        self._source_lang_label = ttk.Label(main_frame, text=self.LANGUAGE_DISPLAY[default_source_lang])
+        source_label = "🎤 あなた" if default_mode == "chat" else self.LANGUAGE_DISPLAY[default_source_lang]
+        self._source_lang_label = ttk.Label(main_frame, text=source_label)
         self._source_lang_label.pack(anchor=tk.W, pady=(5, 2))
         self.en_text = scrolledtext.ScrolledText(
             main_frame, height=8, wrap=tk.WORD,
@@ -220,7 +269,8 @@ class VoiceBridgeGUI:
         self.en_text.configure(state=tk.DISABLED)
 
         # --- ターゲット言語テキスト表示（動的に更新） ---
-        self._target_lang_label = ttk.Label(main_frame, text=self.LANGUAGE_DISPLAY[default_target_lang])
+        target_label = "🤖 AI" if default_mode == "chat" else self.LANGUAGE_DISPLAY[default_target_lang]
+        self._target_lang_label = ttk.Label(main_frame, text=target_label)
         self._target_lang_label.pack(anchor=tk.W, pady=(0, 2))
         self.ja_text = scrolledtext.ScrolledText(
             main_frame, height=8, wrap=tk.WORD,
@@ -229,6 +279,30 @@ class VoiceBridgeGUI:
         )
         self.ja_text.pack(fill=tk.BOTH, expand=True)
         self.ja_text.configure(state=tk.DISABLED)
+
+        # --- チャット用テキスト入力 ---
+        self._chat_frame = ttk.Frame(main_frame)
+        self._chat_frame.pack(fill=tk.X, pady=(8, 0))
+
+        self._chat_entry = tk.Entry(
+            self._chat_frame,
+            bg="#313244", fg="#cdd6f4", font=("Helvetica", 12),
+            insertbackground="#cdd6f4", relief=tk.FLAT,
+        )
+        self._chat_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8), ipady=6)
+        self._chat_entry.bind("<Return>", self._on_chat_submit)
+
+        self._chat_send_btn = tk.Button(
+            self._chat_frame, text="送信", command=self._on_chat_submit,
+            bg="#89b4fa", fg="#1e1e2e", font=("Helvetica", 11, "bold"),
+            activebackground="#7aa8e8", activeforeground="#1e1e2e",
+            width=6, relief=tk.FLAT, cursor="hand2"
+        )
+        self._chat_send_btn.pack(side=tk.RIGHT)
+
+        # モードに応じてチャット入力の表示切り替え
+        if default_mode != "chat":
+            self._chat_frame.pack_forget()
 
         # --- VOICEVOX 利用表記 ---
         self._credit_var = tk.StringVar(value="")
@@ -286,6 +360,13 @@ class VoiceBridgeGUI:
         source = source_display.split()[0] if source_display else "en"
         target = target_display.split()[0] if target_display else "ja"
 
+        mode = self.mode_var.get()
+
+        # チャットモードではソース = ターゲットに自動同期
+        if mode == "chat":
+            self._source_lang_combo.set(target_display)
+            return
+
         # 言語ペアの妥当性チェック
         if source == target:
             print(f"[GUI] 警告: ソース言語とターゲット言語が同じです")
@@ -297,6 +378,63 @@ class VoiceBridgeGUI:
 
         if self.on_language_pair_change:
             self.on_language_pair_change(source, target)
+
+    def _on_mode_changed(self, event=None):
+        """モード変更時にチャット入力欄の表示とラベルを切り替え"""
+        mode = self.mode_var.get()
+        if mode == "chat":
+            # チャット入力欄を表示
+            self._chat_frame.pack(fill=tk.X, pady=(8, 0), before=self._credit_label)
+            # ラベルをチャット用に変更
+            self._source_lang_label.configure(text="🎤 あなた")
+            self._target_lang_label.configure(text="🤖 AI")
+            # チャットモードでは認識言語 = 応答言語に自動同期
+            target_display = self.target_lang_var.get()
+            self._source_lang_combo.set(target_display)
+            self._lang_label.configure(text="会話言語:")
+            self._source_lang_combo.grid_remove()
+            self._lang_arrow.grid_remove()
+        else:
+            self._chat_frame.pack_forget()
+            # ラベルを翻訳用に戻す
+            source = self.source_lang_var.get().split()[0] if self.source_lang_var.get() else "en"
+            target = self.target_lang_var.get().split()[0] if self.target_lang_var.get() else "ja"
+            self._source_lang_label.configure(text=self.LANGUAGE_DISPLAY.get(source, source))
+            self._target_lang_label.configure(text=self.LANGUAGE_DISPLAY.get(target, target))
+            self._lang_label.configure(text="言語:")
+            self._source_lang_combo.grid()
+            self._lang_arrow.grid()
+
+    def _on_chat_submit(self, event=None):
+        """チャットテキスト送信"""
+        text = self._chat_entry.get().strip()
+        if text and self.on_chat_text:
+            self._chat_entry.delete(0, tk.END)
+            self.on_chat_text(text)
+
+    def get_settings(self) -> dict:
+        """現在の GUI 設定を取得（VoiceBridge 作成時に使用）"""
+        # ドロップダウン表示 "en (English)" → "en" に変換
+        source_display = self.source_lang_var.get()
+        target_display = self.target_lang_var.get()
+        source_lang = source_display.split()[0] if source_display else "en"
+        target_lang = target_display.split()[0] if target_display else "ja"
+
+        mode = self.mode_var.get()
+        # チャットモードでは認識言語 = 会話言語（ターゲット言語）
+        if mode == "chat":
+            source_lang = target_lang
+
+        return {
+            "mode": mode,
+            "asr": self.asr_var.get(),
+            "vad": self.vad_var.get(),
+            "device": self.device_var.get(),
+            "voice": self.voice_var.get(),
+            "source_lang": source_lang,
+            "target_lang": target_lang,
+            "ai_model": self.ai_model_var.get(),
+        }
 
     def _on_close(self):
         self._running = False

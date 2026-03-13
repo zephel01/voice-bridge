@@ -27,7 +27,11 @@ class WindowsAudioCapture:
         sample_rate: int = 16000,
         chunk_duration: float = 4.0,
         silence_threshold: float = 0.01,
+        use_vad: bool = False,
+        **kwargs,  # vad_threshold 等の追加パラメータを無視
     ):
+        if use_vad:
+            print("[AudioCapture] 警告: Windows 版は VAD 未対応のため RMS モードで動作します")
         self.device_name = device_name
         self.sample_rate = sample_rate
         self.chunk_duration = chunk_duration

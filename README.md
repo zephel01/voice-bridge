@@ -1,14 +1,31 @@
 # Voice Bridge
 
-リアルタイム多言語音声翻訳アプリ。システム音声をキャプチャして、音声認識 → 翻訳 → 音声合成をリアルタイムに行います。
+リアルタイム音声翻訳 & AI チャットアプリ。2つのモードで使えます。
 
-YouTube の英語動画を日本語音声で聞く、といった使い方ができます。
+**翻訳モード** — システム音声をキャプチャして、音声認識 → 翻訳 → 音声合成をリアルタイムに行います。YouTube の英語動画を日本語音声で聞く、といった使い方ができます。
+
+**チャットモード** — マイクで話しかけると、ローカル LLM が音声で返答します。VOICEVOX と組み合わせれば、ずんだもんと音声で会話できます。
+
+## 主な機能
+
+- リアルタイム多言語翻訳（7言語対応）
+- ローカル LLM による AI 音声チャット（Ollama / LM Studio 等）
+- VOICEVOX 対応 — ずんだもん、四国めたん等のキャラクターボイスで会話
+- Silero VAD による自然な発話検出
+- LLM ストリーミング + TTS ダブルバッファリングで低遅延応答
+- GUI でモード・ASR エンジン・LLM モデルを切り替え可能
+
+## デモ
+
+```
+あなた: こんにちは
+   AI: こんにちは！どうぞ、何でもお手伝いします。（VOICEVOX:ずんだもん で読み上げ）
+       遅延: 0.9s（初回音声 0.4s）
+```
 
 ## 対応言語
 
 英語 / 日本語 / 中国語 / スペイン語 / フランス語 / ドイツ語 / 韓国語
-
-GUI上でソース言語とターゲット言語を選択でき、リアルタイムに切り替え可能です。
 
 > **Note:** Moonshine エンジン使用時は en / ja / zh / es / ko の5言語に対応（fr, de は未対応）。
 
@@ -30,7 +47,7 @@ python3 -m venv venv && source venv/bin/activate   # macOS
 pip install -r requirements.txt
 ```
 
-### 2. 音声キャプチャの準備
+### 2. 音声キャプチャの準備（翻訳モード用）
 
 **Windows** — 設定不要（WASAPIループバックで自動キャプチャ）
 
@@ -42,29 +59,107 @@ brew install blackhole-2ch
 
 インストール後、Audio MIDI設定で複合デバイスを作成してください。詳細は [docs/BLACKHOLE_QUICK_START.md](docs/BLACKHOLE_QUICK_START.md) を参照。
 
-### 3. VOICEVOX（任意）
+> チャットモードではマイクを直接使うため、BlackHole は不要です。
+
+### 3. ローカル LLM の準備（チャットモード用）
+
+チャットモードにはローカル LLM サーバーが必要です。[Ollama](https://ollama.com/) が最も簡単です。
+
+```bash
+# Ollama をインストール後
+ollama pull gemma-2-9b-it        # 日本語対応 9B モデル（推奨）
+ollama pull qwen2.5-7b-instruct  # 軽量な日本語モデル
+ollama serve                      # サーバー起動（デフォルト: localhost:11434）
+```
+
+`.env` ファイルに接続先を設定します。
+
+```env
+AI_BASE_URL=http://localhost:11434/v1
+AI_MODEL=gemma-2-9b-it
+AI_API_KEY=ollama
+```
+
+> OpenAI API や LM Studio 等、OpenAI 互換 API であれば何でも使えます。
+
+### 4. VOICEVOX（任意）
 
 [VOICEVOX](https://voicevox.hiroshiba.jp/) をインストール・起動しておくと、ずんだもん等のキャラクターボイスで読み上げます。未起動時は Edge TTS にフォールバックします。
 
-### 4. 起動
+### 5. 起動
 
 ```bash
+# --- 翻訳モード ---
 python main.py                                     # GUI モード（Whisper）
-python main.py --cli                               # CLI モード
-python main.py --source-lang fr --target-lang ja   # フランス語→日本語
-python main.py --model medium                      # 高精度モデル
+python main.py --asr moonshine --chunk 2.0         # Moonshine で低レイテンシ翻訳
+
+# --- チャットモード ---
+python main.py --mode chat --vad                   # GUI チャット（VAD + Whisper）
+python main.py --mode chat --vad --cli --device "マイク名"  # CLI チャット
+
+# --- その他 ---
 python main.py --list-devices                      # デバイス一覧
+python main.py --source-lang fr --target-lang ja   # フランス語→日本語
 ```
 
-#### デバイス一覧の確認（`--list-devices`）
+## GUI の使い方
 
-`--list-devices` を実行すると、利用可能な音声入力デバイスの一覧が表示されます。
+GUI ではすべての設定をドロップダウンで変更できます。
+
+| 設定 | 説明 |
+|---|---|
+| 入力デバイス | マイクまたはループバックデバイスを選択 |
+| 声 | VOICEVOX キャラクター / Edge TTS ボイスを選択 |
+| 会話言語 | チャットモード時の言語（翻訳モードではソース↔ターゲット） |
+| モード | `translate`（翻訳）/ `chat`（AI チャット） |
+| ASR | `whisper`（高精度）/ `moonshine`（低遅延・英語向き） |
+| VAD | Silero VAD による発話検出（チャットモードで推奨） |
+| LLM | ローカルサーバーのモデルを選択（起動時に自動取得） |
+
+設定を変更したら「開始」ボタンを押すと反映されます。チャットモードではテキスト入力欄も表示され、キーボードからも送信できます。
+
+## 処理パイプライン
+
+### 翻訳モード
+
+```
+音声キャプチャ → ASR認識 → Google翻訳 → TTS音声合成 → 再生
+```
+
+### チャットモード
+
+```
+マイク → VAD発話検出 → ASR認識 → LLM応答(streaming) → TTS文単位合成 → 再生
+                                     ↓                      ↓
+                               1文目を再生しながら      2文目を合成
+                              （ダブルバッファリング）
+```
+
+チャットモードでは以下の最適化により低遅延を実現しています。
+
+| 最適化 | 効果 |
+|---|---|
+| Silero VAD | 発話終了を 0.8s で検出（従来 RMS: 6s+） |
+| LLM ストリーミング | トークン単位で逐次受信、文単位で TTS に渡す |
+| TTS ダブルバッファリング | 1文目再生中に2文目を合成（初回音声 ~0.5s） |
+
+## コンポーネント
+
+| コンポーネント | 技術 |
+|---|---|
+| 音声認識 | Faster-Whisper（デフォルト）/ Moonshine（`--asr moonshine`） |
+| 発話検出 | Silero VAD（`--vad`）/ RMS ベース（デフォルト） |
+| 翻訳 | Google Translate（deep-translator） |
+| AI チャット | OpenAI 互換 API（Ollama / LM Studio / OpenAI 等） |
+| 音声合成 | VOICEVOX（日本語キャラクター）/ Edge TTS（7言語） |
+| 音声キャプチャ | BlackHole + sounddevice（macOS）/ WASAPI（Windows） |
+| GUI | tkinter |
+
+## デバイス一覧の確認
 
 ```bash
 python main.py --list-devices
 ```
-
-出力例：
 
 ```
 利用可能な入力デバイス:
@@ -74,49 +169,17 @@ python main.py --list-devices
   [3] 複合デバイス (ch=2)
 ```
 
-各項目の意味：
+翻訳モードでは BlackHole / LOOPBACK デバイス、チャットモードではマイクデバイスを選択してください。
 
-- `[番号]` — `--device` オプションに指定するインデックス番号
-- `デバイス名` — マイクや仮想デバイスの名称
-- `ch=N` — チャンネル数（1=モノラル、2=ステレオ）
-- `[LOOPBACK]` — システム音声をキャプチャできるデバイス（Windows の WASAPI ループバック等）
+## ASR エンジンの選び方
 
-翻訳モード（システム音声キャプチャ）では BlackHole や複合デバイス、LOOPBACK デバイスを選択してください。チャットモード（マイク入力）ではマイクデバイスを選択します。
+| エンジン | 日本語精度 | 英語精度 | 速度 | 用途 |
+|---|---|---|---|---|
+| Whisper (small) | 高 | 高 | 普通 | 日本語チャット・翻訳全般 |
+| Whisper (medium) | 最高 | 最高 | 遅い | 高精度が必要な場合 |
+| Moonshine | 低 | 高 | 最速 | 英語チャット・英語翻訳 |
 
-```bash
-# 例: BlackHole でシステム音声をキャプチャ（翻訳モード）
-python main.py --device 1
-
-# 例: AirPods のマイクで音声入力（チャットモード）
-python main.py --mode chat --device 2 --source-lang ja
-```
-
-#### Moonshine エンジンで起動
-
-[Moonshine](https://github.com/moonshine-ai/moonshine) はストリーミング対応の軽量 ASR エンジンです。Whisper と比べて低レイテンシ・高精度で、ハルシネーション（無音時の幻聴テキスト）も大幅に減少します。`--chunk 2.0` との併用で応答速度がさらに向上します。
-
-```bash
-pip install moonshine-voice
-python main.py --asr moonshine                     # GUI モード（Moonshine）
-python main.py --asr moonshine --chunk 2.0         # 低レイテンシ（推奨）
-python main.py --asr moonshine --cli               # CLI モード（Moonshine）
-```
-
-`--asr` を省略すると従来通り Whisper で動作します。
-
-## 処理パイプライン
-
-```
-音声キャプチャ → ASR認識 → Google翻訳 → TTS音声合成 → 再生
-```
-
-| コンポーネント | 技術 |
-|---|---|
-| 音声認識 | Faster-Whisper（デフォルト）/ Moonshine（`--asr moonshine`） |
-| 翻訳 | Google Translate（deep-translator） |
-| 音声合成 | VOICEVOX（日本語）/ Edge TTS（7言語） |
-| 音声キャプチャ | BlackHole + sounddevice（macOS）/ WASAPI（Windows） |
-| GUI | tkinter |
+日本語チャットでは **Whisper + VAD** の組み合わせを推奨します。Moonshine は英語に特化しており、日本語の認識精度は低くなります。
 
 ## トラブルシューティング
 
@@ -124,9 +187,12 @@ python main.py --asr moonshine --cli               # CLI モード（Moonshine�
 |---|---|
 | 入力レベルが動かない（macOS） | サウンド出力が複合デバイスか確認 |
 | 入力レベルが動かない（Windows） | `--list-devices` で Loopback デバイスを確認 |
-| 認識精度が低い | `--model medium` に変更、または `--asr moonshine` を試す |
+| 認識精度が低い | `--model medium` に変更、または ASR を `whisper` に |
+| 日本語が認識されない | 会話言語が `ja` になっているか確認 |
+| AI の応答が不正確 | より大きい LLM モデルに変更（7B+推奨） |
 | VOICEVOX が検出されない | VOICEVOX アプリが起動しているか確認 |
-| 遅延が大きい | `--model tiny` や `--chunk 2.0` に変更、または `--asr moonshine` を試す |
+| LLM モデル一覧が空 | Ollama 等の LLM サーバーが起動しているか確認 |
+| 遅延が大きい | VAD を有効化、`--model tiny` や `--chunk 2.0` に変更 |
 
 詳しくは [docs/BLACKHOLE_TROUBLESHOOTING.md](docs/BLACKHOLE_TROUBLESHOOTING.md) を参照してください。
 
