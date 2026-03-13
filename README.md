@@ -4,13 +4,13 @@
 
 **翻訳モード** — システム音声をキャプチャして、音声認識 → 翻訳 → 音声合成をリアルタイムに行います。YouTube の英語動画を日本語音声で聞く、といった使い方ができます。
 
-**チャットモード** — マイクで話しかけると、ローカル LLM が音声で返答します。VOICEVOX と組み合わせれば、ずんだもんと音声で会話できます。
+**チャットモード** — マイクで話しかけると、ローカル LLM が音声で返答します。VOICEVOX・CoeiroInk と組み合わせれば、ずんだもん・リリンちゃんと音声で会話できます。
 
 ## 主な機能
 
 - リアルタイム多言語翻訳（7言語対応）
 - ローカル LLM による AI 音声チャット（Ollama / LM Studio 等）
-- VOICEVOX 対応 — ずんだもん、四国めたん等のキャラクターボイスで会話
+- 複数の TTS エンジン対応 — CoeiroInk（リリンちゃん）、VOICEVOX（ずんだもん等）、Edge TTS
 - Silero VAD による自然な発話検出
 - LLM ストリーミング + TTS ダブルバッファリングで低遅延応答
 - GUI でモード・ASR エンジン・LLM モデルを切り替え可能
@@ -129,9 +129,28 @@ AI_API_KEY=ollama
 
 > OpenAI API や LM Studio 等、OpenAI 互換 API であれば何でも使えます。
 
-### 4. VOICEVOX（任意）
+### 4. 音声合成エンジン（任意）
 
-[VOICEVOX](https://voicevox.hiroshiba.jp/) をインストール・起動しておくと、ずんだもん等のキャラクターボイスで読み上げます。未起動時は Edge TTS にフォールバックします。
+#### CoeiroInk（推奨：リリンちゃん対応）
+
+[CoeiroInk](https://coeiroink.com/) をインストール・起動しておくと、リリンちゃん等のキャラクターボイスで読み上げます。
+
+```bash
+# CoeiroInk Desktop をダウンロード・起動してから：
+python main.py --mode chat --vad --coeiroink  # リリンちゃんとチャット
+```
+
+> CoeiroInk は日本語のみ対応です。多言語翻訳には VOICEVOX または Edge TTS を使用してください。
+
+#### VOICEVOX（代替案：ずんだもん対応）
+
+[VOICEVOX](https://voicevox.hiroshiba.jp/) をインストール・起動しておくと、ずんだもん等のキャラクターボイスで読み上げます。
+
+```bash
+python main.py --mode chat --vad --voicevox  # ずんだもんとチャット
+```
+
+未起動時は Edge TTS にフォールバックします。
 
 ### 5. 起動
 
@@ -142,6 +161,8 @@ python main.py --asr moonshine --chunk 2.0         # Moonshine で低レイテ�
 
 # --- チャットモード ---
 python main.py --mode chat --vad                   # GUI チャット（VAD + Whisper）
+python main.py --mode chat --vad --coeiroink       # リリンちゃんでチャット（CoeiroInk）
+python main.py --mode chat --vad --voicevox        # ずんだもんでチャット（VOICEVOX）
 python main.py --mode chat --vad --cli --device "マイク名"  # CLI チャット
 
 # --- その他 ---
@@ -198,7 +219,7 @@ GUI ではすべての設定をドロップダウンで変更できます。
 | 発話検出 | Silero VAD（`--vad`）/ RMS ベース（デフォルト） |
 | 翻訳 | Google Translate（deep-translator） |
 | AI チャット | OpenAI 互換 API（Ollama / LM Studio / OpenAI 等） |
-| 音声合成 | VOICEVOX（日本語キャラクター）/ Edge TTS（7言語） |
+| 音声合成 | CoeiroInk（リリンちゃん等）/ VOICEVOX（日本語キャラクター）/ Edge TTS（7言語） |
 | 音声キャプチャ | BlackHole + sounddevice（macOS）/ WASAPI（Windows）/ PulseAudio/PipeWire（Linux） |
 | GUI | tkinter |
 

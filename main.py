@@ -41,6 +41,7 @@ from transcriber import Transcriber as WhisperTranscriber
 from translator import Translator
 from tts_engine import TTSEngine
 from tts_voicevox import VoicevoxTTS
+from tts_coeiroink import CoeiroinkTTS
 from player import AudioPlayer
 from translation_logger import TranslationLogger
 from ai_chat import AiChat, load_dotenv
@@ -63,6 +64,8 @@ class VoiceBridge:
         chunk_duration: float = 4.0,
         use_voicevox: bool = False,
         voicevox_speaker_id: int = 3,
+        use_coeiroink: bool = False,
+        coeiroink_speaker_id: int = 0,
         asr_engine: str = "whisper",
         mode: str = "translate",
         ai_base_url: str = "https://api.openai.com/v1",
@@ -105,14 +108,20 @@ class VoiceBridge:
         else:
             self.translator = None
 
-        # TTS エンジン: VOICEVOX が利用可能ならそちらを使う（ただし日本語のみ対応）
+        # TTS エンジン選択: CoeiroInk > VOICEVOX > Edge TTS
         self.use_voicevox = use_voicevox
         self._voicevox_speaker_id = voicevox_speaker_id
-        if use_voicevox and tts_language == "ja":
+
+        if use_coeiroink and tts_language == "ja":
+            self.tts = CoeiroinkTTS(speaker_id=coeiroink_speaker_id)
+            print(f"[VoiceBridge] TTS: CoeiroInk (speaker_id={coeiroink_speaker_id})")
+        elif use_voicevox and tts_language == "ja":
             self.tts = VoicevoxTTS(speaker_id=voicevox_speaker_id)
             print(f"[VoiceBridge] TTS: VOICEVOX (speaker_id={voicevox_speaker_id})")
         else:
-            if use_voicevox and tts_language != "ja":
+            if use_coeiroink and tts_language != "ja":
+                print(f"[VoiceBridge] CoeiroInk は日本語のみ対応のため、Edge TTS にフォールバック")
+            elif use_voicevox and tts_language != "ja":
                 print(f"[VoiceBridge] VOICEVOX は日本語のみ対応のため、Edge TTS にフォールバック")
             self.tts = TTSEngine(language=tts_language, voice=voice)
             print(f"[VoiceBridge] TTS: Edge TTS (language={tts_language})")
@@ -815,7 +824,8 @@ class VoiceBridge:
 
 def run_cli(args):
     """CLI モードで実行"""
-    use_voicevox = VoicevoxTTS.is_available()
+    use_coeiroink = args.coeiroink or CoeiroinkTTS.is_available()
+    use_voicevox = (not use_coeiroink) and (args.voicevox or VoicevoxTTS.is_available())
     bridge = VoiceBridge(
         device_name=args.device,
         model_size=args.model,
@@ -826,6 +836,8 @@ def run_cli(args):
         chunk_duration=args.chunk,
         use_voicevox=use_voicevox,
         voicevox_speaker_id=args.speaker_id if use_voicevox else 3,
+        use_coeiroink=use_coeiroink,
+        coeiroink_speaker_id=args.coeiroink_speaker_id if use_coeiroink else 0,
         asr_engine=args.asr,
         mode=args.mode,
         ai_base_url=args.ai_base_url,
@@ -909,17 +921,25 @@ def run_gui(args):
     except Exception:
         devices = [DEFAULT_DEVICE]
 
+    # CoeiroInk が起動しているか確認
+    coeiroink_available = CoeiroinkTTS.is_available()
+    coeiroink_speakers = {}
+    if coeiroink_available:
+        coeiroink_speakers = CoeiroinkTTS.fetch_speakers()
+        print(f"[VoiceBridge] CoeiroInk 検出: {len(coeiroink_speakers)}キャラ")
+
     # VOICEVOX が起動しているか確認
-    voicevox_available = VoicevoxTTS.is_available()
+    voicevox_available = (not coeiroink_available) and VoicevoxTTS.is_available()
     voicevox_speakers = {}
     if voicevox_available:
         voicevox_speakers = VoicevoxTTS.fetch_speakers()
         print(f"[VoiceBridge] VOICEVOX 検出: {len(voicevox_speakers)}話者")
-    else:
-        print("[VoiceBridge] VOICEVOX 未検出 → Edge TTS を使用")
+    elif not coeiroink_available:
+        print("[VoiceBridge] CoeiroInk・VOICEVOX 未検出 → Edge TTS を使用")
 
-    # デフォルトの speaker_id（ずんだもん ノーマル）
-    default_speaker_id = 3
+    # デフォルトの speaker_id
+    default_speaker_id = 3  # VOICEVOX: ずんだもん ノーマル
+    default_coeiroink_id = 0  # CoeiroInk: リリンちゃん
 
     # ローカル LLM サーバーから利用可能なモデル一覧を取得
     ai_models = AiChat.fetch_models(base_url=args.ai_base_url)
@@ -946,6 +966,8 @@ def run_gui(args):
             tts_language=settings["target_lang"],
             voice=args.voice,
             chunk_duration=args.chunk,
+            use_coeiroink=coeiroink_available,
+            coeiroink_speaker_id=default_coeiroink_id,
             use_voicevox=voicevox_available,
             voicevox_speaker_id=default_speaker_id,
             asr_engine=asr,
@@ -1022,7 +1044,10 @@ def run_gui(args):
     )
 
     # 声のリストを構築
-    if voicevox_available:
+    if coeiroink_available:
+        voice_list = list(coeiroink_speakers.keys())
+        default_voice = "リリンちゃん" if "リリンちゃん" in voice_list else voice_list[0]
+    elif voicevox_available:
         voice_list = list(voicevox_speakers.keys())
         default_voice = "ずんだもん（ノーマル）" if "ずんだもん（ノーマル）" in voice_list else voice_list[0]
     else:
@@ -1042,8 +1067,11 @@ def run_gui(args):
         default_ai_model=args.ai_model,
     )
 
-    # VOICEVOX 利用表記（利用規約に基づくクレジット表記）
-    if voicevox_available:
+    # TTS クレジット表記
+    if coeiroink_available:
+        credit = f"CoeiroInk:{default_voice} | https://coeiroink.com/"
+        gui.set_credit(credit)
+    elif voicevox_available:
         credit = f"VOICEVOX:{default_voice.split('（')[0]} | https://voicevox.hiroshiba.jp/"
         gui.set_credit(credit)
 
@@ -1074,8 +1102,14 @@ def main():
                         help="音声合成言語 (default: target-lang と同じ)")
     parser.add_argument("--voice", default="nanami", choices=["nanami", "keita", "jenny", "guy", "xiaoxiao", "yunxi", "elvira", "alvaro", "denise", "henri", "katja", "conrad", "sunhi", "injoon"],
                         help="Edge TTS 音声 (VOICEVOX未使用時)")
+    parser.add_argument("--voicevox", action="store_true",
+                        help="VOICEVOX エンジンを使用（日本語のみ）")
     parser.add_argument("--speaker-id", type=int, default=3,
                         help="VOICEVOX speaker ID (default: 3 = ずんだもん)")
+    parser.add_argument("--coeiroink", action="store_true",
+                        help="CoeiroInk エンジンを使用（日本語のみ、リリンちゃん推奨）")
+    parser.add_argument("--coeiroink-speaker-id", type=int, default=0,
+                        help="CoeiroInk speaker ID (default: 0 = リリンちゃん)")
     parser.add_argument("--chunk", type=float, default=4.0, help="音声チャンク長（秒）")
 
     # VAD (Voice Activity Detection)
