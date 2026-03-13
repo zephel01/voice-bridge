@@ -137,7 +137,13 @@ AI_API_KEY=ollama
 
 ```bash
 # CoeiroInk Desktop をダウンロード・起動してから：
+
+# チャットモード
 python main.py --mode chat --vad --coeiroink  # リリンちゃんとチャット
+
+# 翻訳モード（リリンちゃんが翻訳結果を読み上げ）
+python main.py --mode translate --coeiroink --source-lang ja --target-lang en  # 日本語→英語翻訳
+python main.py --mode translate --coeiroink --source-lang en --target-lang ja  # 英語→日本語翻訳
 ```
 
 **CoeiroInk ポート番号が異なる場合：**
@@ -176,8 +182,10 @@ python main.py --mode chat --vad --voicevox  # ずんだもんとチャット
 
 ```bash
 # --- 翻訳モード ---
-python main.py                                     # GUI モード（Whisper）
-python main.py --asr moonshine --chunk 2.0         # Moonshine で低レイテンシ翻訳
+python main.py                                                             # GUI モード（Whisper）
+python main.py --asr moonshine --chunk 2.0                                 # Moonshine で低レイテンシ翻訳
+python main.py --mode translate --coeiroink --source-lang ja --target-lang en  # リリンちゃんが英語を読み上げ
+python main.py --mode translate --source-lang en --target-lang ja          # フランス語→日本語翻訳
 
 # --- チャットモード ---
 python main.py --mode chat --vad                   # GUI チャット（VAD + Whisper）
@@ -187,7 +195,6 @@ python main.py --mode chat --vad --cli --device "マイク名"  # CLI チャッ�
 
 # --- その他 ---
 python main.py --list-devices                      # デバイス一覧
-python main.py --source-lang fr --target-lang ja   # フランス語→日本語
 ```
 
 ## GUI の使い方
