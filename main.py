@@ -1010,7 +1010,24 @@ def run_gui(args):
         bridge = bridge_holder["bridge"]
         if not bridge:
             return
-        if voicevox_available:
+
+        if coeiroink_available:
+            # CoeiroInk: UUID:styleId 形式で取得
+            uuid_style = coeiroink_speakers.get(voice_key)
+            if uuid_style:
+                # UUID と styleId を分離
+                parts = str(uuid_style).split(":")
+                if len(parts) == 2:
+                    uuid, style_id = parts
+                    bridge.tts.set_speaker_uuid(uuid)
+                    bridge.tts.set_speaker(int(style_id))
+                    # CoeiroInk クレジット表記を更新
+                    char_name = voice_key.split("（")[0]
+                    gui.set_credit(f"CoeiroInk:{char_name} | https://coeiroink.com/")
+                    print(f"[GUI] CoeiroInk変更: {voice_key} (UUID={uuid}, styleId={style_id})")
+            else:
+                print(f"[GUI] 不明なキャラクター: {voice_key}")
+        elif voicevox_available:
             sid = voicevox_speakers.get(voice_key)
             if sid is not None:
                 bridge.change_voice(str(sid))

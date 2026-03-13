@@ -128,12 +128,14 @@ class CoeiroinkTTS:
                 "outputSamplingRate": 44100,
             }
 
+            print(f"[CoeiroinkTTS] リクエスト: uuid={self.speaker_uuid}, styleId={self.speaker_id}")
             resp = requests.post(
                 f"{self.host}/v1/synthesis",
                 json=payload,
                 headers={"Accept": "audio/wav"},
                 timeout=30,
             )
+            print(f"[CoeiroinkTTS] ステータスコード: {resp.status_code}")
             resp.raise_for_status()
 
             # WAV ファイルとして保存
