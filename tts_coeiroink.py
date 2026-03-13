@@ -14,25 +14,27 @@ import tempfile
 import requests
 
 # デフォルトのキャラクター一覧（CoeiroInk エンジンから取得できない場合のフォールバック）
+# 形式: "キャラ名（スタイル）": "UUID:styleId"
 DEFAULT_SPEAKERS = {
-    "リリンちゃん": 0,
+    "リリンちゃん": "3c37646f-3881-5374-2a83-149267990abc:0",
 }
 
 
 class CoeiroinkTTS:
     """CoeiroInk エンジンを使った音声合成"""
 
-    def __init__(self, speaker_id: int = 0, host: str = None):
+    def __init__(self, speaker_id: int = 0, speaker_uuid: str = None, host: str = None):
         """
         Args:
-            speaker_id: キャラクターID（デフォルト: 0 = リリンちゃん）
-            host: CoeiroInk エンジンの URL (デフォルト: http://localhost:50031)
-                  環境変数 COEIROINK_HOST でも指定可能
+            speaker_id: スタイルID（デフォルト: 0 = ノーマル）
+            speaker_uuid: キャラクター UUID（デフォルト: リリンちゃん）
+            host: CoeiroInk エンジンの URL (デフォルト: 環境変数 COEIROINK_HOST or http://localhost:50031)
         """
         import os
         if host is None:
             host = os.environ.get("COEIROINK_HOST", "http://localhost:50031")
         self.speaker_id = speaker_id
+        self.speaker_uuid = speaker_uuid or "3c37646f-3881-5374-2a83-149267990abc"  # デフォルト: リリンちゃん
         self.host = host
         self._temp_dir = tempfile.mkdtemp(prefix="voice_bridge_ci_")
         self._counter = 0
@@ -60,16 +62,16 @@ class CoeiroinkTTS:
 
         result = {}
         for speaker in speakers:
-            name = speaker.get("name", "Unknown")
-            speaker_uuid = speaker.get("uuid", "")
+            speaker_name = speaker.get("speakerName", "Unknown")
+            speaker_uuid = speaker.get("speakerUuid", "")
             for style in speaker.get("styles", []):
-                style_name = style.get("name", "")
-                style_id = style.get("id", 0)
-                if style_name == "ノーマル" or style_name == name or not style_name:
-                    label = name
+                style_name = style.get("styleName", "")
+                style_id = style.get("styleId", 0)
+                if style_name == "ノーマル" or not style_name:
+                    label = speaker_name
                 else:
-                    label = f"{name}（{style_name}）"
-                # キャラクター情報を保存（uuid:style_id の形式）
+                    label = f"{speaker_name}（{style_name}）"
+                # キャラクター情報を保存（uuid:styleId の形式で、GUI で使用）
                 result[label] = f"{speaker_uuid}:{style_id}"
         return result
 
@@ -113,12 +115,9 @@ class CoeiroinkTTS:
 
         try:
             # CoeiroInk API: /v1/synthesis で音声合成
-            # リリンちゃんの speakerUuid（デフォルト）
-            speaker_uuid = "3c37646f-3881-5374-2a83-149267990abc"
-
             payload = {
                 "text": text.strip(),
-                "speakerUuid": speaker_uuid,
+                "speakerUuid": self.speaker_uuid,
                 "styleId": self.speaker_id,
                 "speedScale": 1.0,
                 "volumeScale": 1.0,
@@ -147,10 +146,15 @@ class CoeiroinkTTS:
             print(f"[CoeiroinkTTS] 音声合成エラー: {e}")
             return None
 
-    def set_speaker(self, speaker_id: int):
+    def set_speaker(self, style_id: int):
+        """スタイル（声）を変更"""
+        self.speaker_id = style_id
+        print(f"[CoeiroinkTTS] スタイルを変更: style_id={style_id}")
+
+    def set_speaker_uuid(self, speaker_uuid: str):
         """キャラクターを変更"""
-        self.speaker_id = speaker_id
-        print(f"[CoeiroinkTTS] キャラクターを変更: speaker_id={speaker_id}")
+        self.speaker_uuid = speaker_uuid
+        print(f"[CoeiroinkTTS] キャラクターを変更: speaker_uuid={speaker_uuid}")
 
     def cleanup(self):
         """一時ファイルを削除"""
