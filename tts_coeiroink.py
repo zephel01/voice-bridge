@@ -22,27 +22,37 @@ DEFAULT_SPEAKERS = {
 class CoeiroinkTTS:
     """CoeiroInk エンジンを使った音声合成"""
 
-    def __init__(self, speaker_id: int = 0, host: str = "http://localhost:50031"):
+    def __init__(self, speaker_id: int = 0, host: str = None):
         """
         Args:
             speaker_id: キャラクターID（デフォルト: 0 = リリンちゃん）
-            host: CoeiroInk エンジンの URL
+            host: CoeiroInk エンジンの URL (デフォルト: http://localhost:50031)
+                  環境変数 COEIROINK_HOST でも指定可能
         """
+        import os
+        if host is None:
+            host = os.environ.get("COEIROINK_HOST", "http://localhost:50031")
         self.speaker_id = speaker_id
         self.host = host
         self._temp_dir = tempfile.mkdtemp(prefix="voice_bridge_ci_")
         self._counter = 0
 
     @staticmethod
-    def fetch_speakers(host: str = "http://localhost:50031") -> dict[str, int]:
+    def fetch_speakers(host: str = None) -> dict[str, int]:
         """
         CoeiroInk エンジンからキャラクター一覧を取得する
+
+        Args:
+            host: CoeiroInk エンジンの URL (デフォルト: 環境変数 COEIROINK_HOST or http://localhost:50031)
 
         Returns:
             {"キャラ名（スタイル）": speaker_id, ...}
         """
+        import os
+        if host is None:
+            host = os.environ.get("COEIROINK_HOST", "http://localhost:50031")
         try:
-            resp = requests.get(f"{host}/speakers", timeout=3)
+            resp = requests.get(f"{host}/v1/speakers", timeout=3)
             resp.raise_for_status()
             speakers = resp.json()
         except Exception:
@@ -62,10 +72,18 @@ class CoeiroinkTTS:
         return result
 
     @staticmethod
-    def is_available(host: str = "http://localhost:50031") -> bool:
-        """CoeiroInk エンジンが起動しているか確認"""
+    def is_available(host: str = None) -> bool:
+        """
+        CoeiroInk エンジンが起動しているか確認
+
+        Args:
+            host: CoeiroInk エンジンの URL (デフォルト: 環境変数 COEIROINK_HOST or http://localhost:50031)
+        """
+        import os
+        if host is None:
+            host = os.environ.get("COEIROINK_HOST", "http://localhost:50031")
         try:
-            resp = requests.get(f"{host}/version", timeout=2)
+            resp = requests.get(f"{host}/v1/speakers", timeout=2)
             return resp.status_code == 200
         except Exception:
             return False
@@ -92,25 +110,16 @@ class CoeiroinkTTS:
         output_path = os.path.join(self._temp_dir, f"ci_{self._counter:06d}.wav")
 
         try:
-            # 1. audio_query: 読み上げクエリを作成
+            # CoeiroInk API: /v1/synthesis で音声合成
             resp = requests.post(
-                f"{self.host}/audio_query",
-                params={"text": text.strip(), "speaker": self.speaker_id},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            query = resp.json()
-
-            # 2. synthesis: 音声合成
-            resp = requests.post(
-                f"{self.host}/synthesis",
+                f"{self.host}/v1/synthesis",
                 params={"speaker": self.speaker_id},
-                json=query,
+                json={"text": text.strip()},
                 timeout=30,
             )
             resp.raise_for_status()
 
-            # 3. WAV ファイルとして保存
+            # WAV ファイルとして保存
             with open(output_path, "wb") as f:
                 f.write(resp.content)
 

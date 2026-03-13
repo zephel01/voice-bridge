@@ -140,6 +140,26 @@ AI_API_KEY=ollama
 python main.py --mode chat --vad --coeiroink  # リリンちゃんとチャット
 ```
 
+**CoeiroInk ポート番号が異なる場合：**
+
+CoeiroInk のポートがデフォルト（50031）と異なる場合は、環境変数で指定：
+
+```bash
+# .env ファイルに追加（推奨）
+COEIROINK_HOST=http://localhost:50021
+
+# またはコマンドラインで指定
+export COEIROINK_HOST=http://localhost:50021
+python main.py --mode chat --vad --coeiroink
+```
+
+ポート番号の確認方法：
+```bash
+curl http://localhost:50031/version  # デフォルト
+curl http://localhost:50021/version  # VOICEVOX と共有の場合
+curl http://localhost:8000/version   # カスタム設定の場合
+```
+
 > CoeiroInk は日本語のみ対応です。多言語翻訳には VOICEVOX または Edge TTS を使用してください。
 
 #### VOICEVOX（代替案：ずんだもん対応）
@@ -267,6 +287,8 @@ python main.py --list-devices
 | 認識精度が低い | `--model medium` に変更、または ASR を `whisper` に |
 | 日本語が認識されない | 会話言語が `ja` になっているか確認 |
 | AI の応答が不正確 | より大きい LLM モデルに変更（7B+推奨） |
+| CoeiroInk が検出されない | CoeiroInk アプリが起動しているか確認、ポート番号を確認 |
+| CoeiroInk ポート違う | `COEIROINK_HOST=http://localhost:ポート番号` で指定 |
 | VOICEVOX が検出されない | VOICEVOX アプリが起動しているか確認 |
 | LLM モデル一覧が空 | Ollama 等の LLM サーバーが起動しているか確認 |
 | 遅延が大きい | VAD を有効化、`--model tiny` や `--chunk 2.0` に変更 |
