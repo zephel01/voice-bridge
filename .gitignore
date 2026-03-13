@@ -53,6 +53,7 @@ logs/
 # 内部ドキュメント（公開不要）
 docs/done/
 docs/internal/
+docs/note/
 
 # Note 記事原稿
 note_article*.md

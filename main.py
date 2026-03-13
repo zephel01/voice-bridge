@@ -20,12 +20,18 @@ import signal
 import time
 
 # OS に応じた AudioCapture を選択
-IS_WINDOWS = platform.system() == "Windows"
+_SYSTEM = platform.system()
+IS_WINDOWS = _SYSTEM == "Windows"
+IS_LINUX = _SYSTEM == "Linux"
 
 if IS_WINDOWS:
     from audio_capture_win import WindowsAudioCapture as AudioCapture
     DEFAULT_DEVICE = "default"
+elif IS_LINUX:
+    from audio_capture import AudioCapture
+    DEFAULT_DEVICE = "default"
 else:
+    # macOS
     from audio_capture import AudioCapture
     DEFAULT_DEVICE = "BlackHole 2ch"
 
@@ -836,7 +842,12 @@ def run_cli(args):
     signal.signal(signal.SIGINT, signal_handler)
 
     tts_name = "VOICEVOX" if use_voicevox else "Edge TTS"
-    os_name = "Windows (WASAPI)" if IS_WINDOWS else "macOS (BlackHole)"
+    if IS_WINDOWS:
+        os_name = "Windows (WASAPI)"
+    elif IS_LINUX:
+        os_name = "Linux (PulseAudio/PipeWire)"
+    else:
+        os_name = "macOS (BlackHole)"
     asr_name = "Moonshine" if args.asr == "moonshine" else f"faster-whisper ({args.model})"
     mode_name = "AI チャット" if args.mode == "chat" else "翻訳"
     vad_name = "Silero VAD" if args.vad and args.mode == "chat" else "RMS"

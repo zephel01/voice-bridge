@@ -32,7 +32,7 @@
 ## 動作環境
 
 - Python 3.9+
-- macOS 10.12+ / Windows 10・11
+- macOS 10.12+ / Windows 10・11 / Linux（PulseAudio or PipeWire）
 - メモリ 4GB以上（8GB推奨）
 
 ## セットアップ
@@ -42,10 +42,18 @@
 ```bash
 git clone https://github.com/zephel01/voice-bridge.git
 cd voice-bridge
-python3 -m venv venv && source venv/bin/activate   # macOS
+python3 -m venv venv && source venv/bin/activate   # macOS / Linux
 # python -m venv venv && venv\Scripts\activate      # Windows
 pip install -r requirements.txt
 ```
+
+> **Linux の場合:** PortAudio と tkinter が必要です。
+> ```bash
+> # Ubuntu / Debian
+> sudo apt install portaudio19-dev python3-tk
+> # Fedora
+> sudo dnf install portaudio-devel python3-tkinter
+> ```
 
 ### 2. 音声キャプチャの準備（翻訳モード用）
 
@@ -59,7 +67,18 @@ brew install blackhole-2ch
 
 インストール後、Audio MIDI設定で複合デバイスを作成してください。詳細は [docs/BLACKHOLE_QUICK_START.md](docs/BLACKHOLE_QUICK_START.md) を参照。
 
-> チャットモードではマイクを直接使うため、BlackHole は不要です。
+**Linux** — PulseAudio / PipeWire のモニターデバイスでシステム音声をキャプチャできます。
+
+```bash
+# モニターデバイスの確認
+python main.py --list-devices
+# 出力に "Monitor of ..." があればシステム音声キャプチャ可能
+# 例: python main.py --device "Monitor of Built-in Audio"
+```
+
+> PipeWire 環境では `pipewire-pulse` パッケージが必要な場合があります。
+
+> チャットモードではマイクを直接使うため、ループバック設定は不要です。
 
 ### 3. ローカル LLM の準備（チャットモード用）
 
@@ -152,7 +171,7 @@ GUI ではすべての設定をドロップダウンで変更できます。
 | 翻訳 | Google Translate（deep-translator） |
 | AI チャット | OpenAI 互換 API（Ollama / LM Studio / OpenAI 等） |
 | 音声合成 | VOICEVOX（日本語キャラクター）/ Edge TTS（7言語） |
-| 音声キャプチャ | BlackHole + sounddevice（macOS）/ WASAPI（Windows） |
+| 音声キャプチャ | BlackHole + sounddevice（macOS）/ WASAPI（Windows）/ PulseAudio/PipeWire（Linux） |
 | GUI | tkinter |
 
 ## デバイス一覧の確認
@@ -162,11 +181,19 @@ python main.py --list-devices
 ```
 
 ```
+# macOS
 利用可能な入力デバイス:
   [0] MacBook Pro マイク (ch=1)
   [1] BlackHole 2ch (ch=2) [LOOPBACK]
   [2] AirPods Pro (ch=1)
   [3] 複合デバイス (ch=2)
+
+# Linux
+利用可能な入力デバイス:
+  [0] default (ch=2)
+  [1] HDA Intel PCH: ALC892 (ch=2)
+  [2] Monitor of Built-in Audio (ch=2) [LOOPBACK]
+  [3] USB Microphone (ch=1)
 ```
 
 翻訳モードでは BlackHole / LOOPBACK デバイス、チャットモードではマイクデバイスを選択してください。

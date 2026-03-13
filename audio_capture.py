@@ -1,6 +1,7 @@
 """
 音声キャプチャモジュール
-BlackHole経由でmacOSのシステム音声をキャプチャする
+sounddevice を使用してシステム音声・マイク入力をキャプチャする
+macOS: BlackHole経由 / Linux: PulseAudio/PipeWire モニター
 
 VAD（Voice Activity Detection）モード:
   Silero VAD を使い、発話の開始・終了をニューラルネットで検出。
@@ -91,11 +92,15 @@ class AudioCapture:
         result = []
         for i, d in enumerate(devices):
             if d["max_input_channels"] > 0:
+                name = d["name"]
+                # Linux: PulseAudio/PipeWire の Monitor デバイスを検出
+                is_loopback = "monitor" in name.lower() or "loopback" in name.lower()
                 result.append({
                     "index": i,
-                    "name": d["name"],
+                    "name": name,
                     "channels": d["max_input_channels"],
                     "sample_rate": d["default_samplerate"],
+                    "is_loopback": is_loopback,
                 })
         return result
 
@@ -213,7 +218,7 @@ class AudioCapture:
             raise RuntimeError(
                 f"デバイス '{self.device_name}' が見つかりません。\n"
                 f"利用可能な入力デバイス: {device_names}\n"
-                f"BlackHole がインストールされているか確認してください。"
+                f"--list-devices でデバイスを確認してください。"
             )
 
         self._running = True
