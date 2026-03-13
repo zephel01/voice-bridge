@@ -76,9 +76,37 @@ python main.py --list-devices
 # 例: python main.py --device "Monitor of Built-in Audio"
 ```
 
-> PipeWire 環境では `pipewire-pulse` パッケージが必要な場合があります。
+**Linux 音声キャプチャのセットアップ**
+
+PulseAudio 環境でモニターデバイスが見当たらない場合：
+
+```bash
+# PulseAudio の負荷モジュールを確認
+pactl list modules | grep loopback
+
+# ない場合は負荷
+pactl load-module module-loopback latency_msec=1
+
+# モニターデバイスの確認
+pactl list sources | grep Monitor
+```
+
+PipeWire 環境の場合：
+
+```bash
+# pipewire-pulse がインストール済み確認
+apt list --installed | grep pipewire-pulse
+
+# ない場合はインストール
+sudo apt install pipewire-pulse
+
+# サービス再起動
+systemctl restart --user pipewire pipewire-pulse
+```
 
 > チャットモードではマイクを直接使うため、ループバック設定は不要です。
+
+> **トラブル時:** Linux でシステム音声がキャプチャできない場合は、 [docs/LINUX_TROUBLESHOOTING.md](docs/LINUX_TROUBLESHOOTING.md) を参照してください。
 
 ### 3. ローカル LLM の準備（チャットモード用）
 
@@ -214,6 +242,7 @@ python main.py --list-devices
 |---|---|
 | 入力レベルが動かない（macOS） | サウンド出力が複合デバイスか確認 |
 | 入力レベルが動かない（Windows） | `--list-devices` で Loopback デバイスを確認 |
+| モニターデバイスがない（Linux） | `pactl load-module module-loopback` で作成、または PipeWire 環境を確認 |
 | 認識精度が低い | `--model medium` に変更、または ASR を `whisper` に |
 | 日本語が認識されない | 会話言語が `ja` になっているか確認 |
 | AI の応答が不正確 | より大きい LLM モデルに変更（7B+推奨） |
@@ -225,9 +254,13 @@ python main.py --list-devices
 
 ## ドキュメント
 
+**macOS:**
 - [BlackHole クイックスタート](docs/BLACKHOLE_QUICK_START.md) — macOS 音声キャプチャの設定（5分）
 - [BlackHole 詳細マニュアル](docs/BLACKHOLE_MANUAL.md) — 詳しい設定方法
 - [BlackHole トラブルシューティング](docs/BLACKHOLE_TROUBLESHOOTING.md) — 問題解決
+
+**Linux:**
+- [Linux トラブルシューティング](docs/LINUX_TROUBLESHOOTING.md) — PulseAudio/PipeWire トラブル対応
 
 ## VOICEVOX 利用表記
 
