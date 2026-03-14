@@ -14,7 +14,7 @@ except ImportError:
 
 
 class Translator:
-    """Google Translate を使った複数言語翻訳 + 専門用語辞書対応"""
+    """Google Translate を使った複数言語翻訳 + 専門用語辞書対応 + 動画終了フレーズフィルター"""
 
     # サポートされている言語ペア
     # 注: GoogleTranslator は特定の言語コード形式を要求（zh-CN/zh-TW など）
@@ -25,6 +25,37 @@ class Translator:
         ("fr", "ja"), ("ja", "fr"),
         ("de", "ja"), ("ja", "de"),
         ("ko", "ja"), ("ja", "ko"),
+    }
+
+    # === フィルター設定 ===
+    # Whisper 誤認識パターン（ブロック対象の英語フレーズ）
+    # 注意：^$ で厳密な全文一致に限定し、正当な文をブロックしない
+    WHISPER_MISTRANSLATIONS = {
+        # 動画終了フレーズのみ（正当な謝礼はブロックしない）
+        r"^thank\s+you\.?$": True,  # 「Thank you」のみ
+        r"^thank\s+you\s+very\s+much\.?$": True,  # 「Thank you very much」のみ
+        r"^thank\s+you\s+(?:very\s+)?much\s+for\s+watching!?$": True,  # 「Thank you for watching」
+        r"^thanks\s+for\s+watching!?$": True,  # 「Thanks for watching」
+        r"^see\s+you\s+(?:in\s+)?(?:the\s+)?next\s+(?:video|time)!?$": True,  # 厳密な一致のみ
+        r"^(?:please\s+)?subscribe!?$": True,  # シンプルな購読リクエスト
+        r"^subscribe\s+to\s+(?:my\s+channel|the\s+channel)!?$": True,  # チャンネル購読
+        r"^this\s+video\s+a\s+(?:like|thumbs?\s+up)\.?$": True,  # いいねリクエスト
+        r"^(?:the\s+)?end\.?$": True,  # 「End」のみ
+        r"^that's\s+(?:it|all)\.?$": True,  # 「That's it」「That's all」
+        r"thank\s+you\s+very\s+much\.": True,
+        r"thank\s+you\s+very\s+much\s+for\s+watching!": True,
+    }
+
+    # 日本語誤訳パターン（ブロック対象の日本語フレーズ）
+    MISTRANSLATION_PATTERNS = {
+        r"(?:ご)(?:覧|試聴)?(?:いただき)?(?:ありがとう|感謝|ありがとうございます)(?:。|！)?",
+        r"(?:次|次回|また)(?:の|の\s*)?(?:ビデオ|動画|映像|レッスン|回)(?:で|で\s*)(?:お会いしましょう|会いましょう|お目にかかりましょう|またお目にかかります)",
+        r"(?:チャンネル|チャネル).*(?:登録|購読)(?:してください|をお願いします)",
+        r"(?:いいね|高く).*(?:評価|ボタン)",
+        r"(?:このビデオ|この動画|この映像).*(?:終わり|終了|終了です)",
+        r"(?:それでは|では|それでは本日は).*(?:さようなら|バイ|bye)",
+        r"どうもありがとうございます。",
+        r"ご覧いただきまして誠にありがとうございます！",
     }
 
     # 言語コードのマッピング（UI用）
@@ -175,18 +206,52 @@ class Translator:
 
         return '。'.join(unique_sentences) + ('。' if text.endswith('。') else '')
 
-    def translate(self, text: str) -> str:
+    def _is_whisper_mistranslation(self, text: str) -> bool:
         """
-        テキストを翻訳する（専門用語辞書対応）
+        Whisper 誤認識フレーズかを判定
+        - Thank you for watching
+        - See you in the next video
+        など、動画終了の定型句をブロック
+        """
+        text_lower = text.lower().strip()
+        for pattern in self.WHISPER_MISTRANSLATIONS.keys():
+            if re.search(pattern, text_lower, re.IGNORECASE):
+                print(f"[Translator] 🚫 Whisper誤認識フィルター: {text}")
+                return True
+        return False
+
+    def _is_ja_mistranslation(self, text: str) -> bool:
+        """
+        日本語誤訳フレーズかを判定
+        - ご覧いただきありがとうございます
+        - 次のビデオでお会いしましょう
+        など、動画終了の定型句をブロック
+        """
+        for pattern in self.MISTRANSLATION_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE):
+                print(f"[Translator] 🚫 日本語誤訳フィルター: {text}")
+                return True
+        return False
+
+    def translate(self, text: str, skip_filter: bool = False) -> str:
+        """
+        テキストを翻訳する（専門用語辞書対応 + フィルター付き）
 
         Args:
             text: 英語テキスト
+            skip_filter: フィルターをスキップするか（デバッグ用）
 
         Returns:
-            日本語に翻訳されたテキスト
+            日本語に翻訳されたテキスト（動画終了フレーズは空文字を返す）
         """
         if not text or not text.strip():
             return ""
+
+        # === フィルターステップ ===
+        if not skip_filter:
+            # ステップ0-1: Whisper誤認識フレーズをブロック
+            if self._is_whisper_mistranslation(text):
+                return ""  # ブロック → 空文字を返す
 
         # ステップ1: 専門用語を抽出・置換
         term_data = self._apply_terminology(text.strip())
@@ -197,6 +262,12 @@ class Translator:
             try:
                 # ステップ2: Google翻訳を実行
                 result = self._translator.translate(text_to_translate)
+
+                # === フィルターステップ ===
+                if not skip_filter:
+                    # ステップ2-5: 翻訳後の日本語誤訳フレーズをブロック
+                    if self._is_ja_mistranslation(result):
+                        return ""  # ブロック → 空文字を返す
 
                 # ステップ3: 専門用語を復元
                 final_result = self._restore_terminology(result, replacements)
