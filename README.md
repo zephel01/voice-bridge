@@ -129,6 +129,134 @@ AI_API_KEY=ollama
 
 > OpenAI API や LM Studio 等、OpenAI 互換 API であれば何でも使えます。
 
+## Ollama について
+
+### Ollama とは
+
+**Ollama** はローカルコンピュータ上で大規模言語モデル（LLM）を実行するためのツールです。インターネット接続やクラウドサービスに依存せず、完全にプライベートな環境で AI チャットが実現できます。
+
+### Voice Bridge での役割
+
+Voice Bridge のチャットモードでは、Ollama がバックグラウンドで実行する LLM サーバーに HTTP リクエストを送信して、AI の応答を取得しています：
+
+1. **マイク入力** → Whisper で音声認識 → テキスト化
+2. **テキスト送信** → **Ollama サーバー（localhost:11434）** に OpenAI 互換 API でリクエスト
+3. **LLM 応答** → Streaming で逐次受信 → 文単位で TTS エンジンに送信
+4. **音声出力** → CoeiroInk / VOICEVOX / Edge TTS で読み上げ
+
+つまり、Ollama は Voice Bridge の「裏で動く AI エンジン」として機能しており、ユーザーがマイクで話しかけると、自動的に Ollama と通信して応答を生成しています。
+
+### セットアップ手順
+
+#### 1. Ollama のインストール
+
+[Ollama 公式サイト](https://ollama.com/) から、ご使用のOS（macOS / Windows / Linux）に対応したインストーラをダウンロードしてください。
+
+#### 2. LLM モデルのダウンロード
+
+Ollama コマンドラインで使用するモデルをダウンロードします：
+
+```bash
+# 推奨：日本語対応、バランスの取れた 9B モデル
+ollama pull gemma-2-9b-it
+
+# または軽量な 7B モデル（低スペック環境向け）
+ollama pull qwen2.5-7b-instruct
+
+# または高精度な 13B モデル（メモリ8GB+推奨）
+ollama pull qwen2.5-14b-instruct
+```
+
+> **モデル選択の目安：**
+> - 日本語精度：`gemma-2-9b-it` > `qwen2.5-14b` > `qwen2.5-7b`
+> - 処理速度：`qwen2.5-7b` > `gemma-2-9b-it` > `qwen2.5-14b`
+> - メモリ使用量：`qwen2.5-7b`（~5GB） < `gemma-2-9b-it`（~7GB） < `qwen2.5-14b`（~10GB）
+
+#### 3. Ollama サーバーの起動
+
+```bash
+ollama serve
+```
+
+このコマンドで Ollama サーバーがバックグラウンドで起動し、`localhost:11434` でリッスンを開始します。
+
+> **重要：** Voice Bridge を実行する際は、**常に Ollama サーバーが起動している状態**にしておいてください。起動していないと、チャットモードで「LLM モデル一覧が空」になったり、応答が返ってきません。
+
+#### 4. Voice Bridge で使用するモデルの設定
+
+`.env` ファイルで、使用するモデルと接続先を指定：
+
+```env
+AI_BASE_URL=http://localhost:11434/v1
+AI_MODEL=gemma-2-9b-it
+AI_API_KEY=ollama
+```
+
+または、GUI のドロップダウンで実行時に選択：
+
+```bash
+python main.py --mode chat --vad
+# GUI 起動後、「LLM」ドロップダウンから使用するモデルを選択
+```
+
+### 複数モデルの同時ダウンロード
+
+複数のモデルをダウンロードしておくと、GUI で実行時に切り替え可能です：
+
+```bash
+ollama pull gemma-2-9b-it
+ollama pull qwen2.5-7b-instruct
+ollama pull qwen2.5-14b-instruct
+```
+
+その後、GUI の「LLM」ドロップダウンで任意のモデルを選択できます。
+
+### バックグラウンド実行（推奨）
+
+Ollama を起動したまま Voice Bridge を複数回使用する場合、バックグラウンドで Ollama を実行しておくと便利です：
+
+**macOS / Linux：**
+```bash
+# ターミナル 1（Ollama サーバー）
+ollama serve
+
+# ターミナル 2（Voice Bridge）
+python main.py --mode chat --vad
+```
+
+**Windows（バックグラウンドで実行）：**
+```powershell
+Start-Process -NoNewWindow ollama serve
+python main.py --mode chat --vad
+```
+
+### トラブルシューティング
+
+| 症状 | 原因 | 対処 |
+|---|---|---|
+| LLM モデル一覧が空 | Ollama サーバーが起動していない | `ollama serve` でサーバーを起動 |
+| 接続タイムアウト | Ollama が起動していない or ポートが違う | `AI_BASE_URL` を確認 |
+| メモリ不足エラー | LLM モデルが大きすぎる | 小さいモデル（7B）に変更 |
+| 日本語応答の精度が低い | モデルが英語特化 | `gemma-2-9b-it` や `qwen2.5` に変更 |
+
+### 別の LLM サーバーを使用する場合
+
+Ollama の代わりに以下のツールも使用可能です（OpenAI 互換 API が必要）：
+
+**LM Studio（GUI ベース）：**
+```env
+AI_BASE_URL=http://localhost:1234/v1
+AI_MODEL=モデル名
+AI_API_KEY=lm-studio
+```
+
+**OpenAI API（クラウド）：**
+```env
+AI_BASE_URL=https://api.openai.com/v1
+AI_MODEL=gpt-3.5-turbo
+AI_API_KEY=sk-...（OpenAI APIキー）
+```
+
 ### 4. 音声合成エンジン（任意）
 
 #### CoeiroInk（推奨：リリンちゃん対応）
@@ -213,21 +341,98 @@ GUI ではすべての設定をドロップダウンで変更できます。
 
 設定を変更したら「開始」ボタンを押すと反映されます。チャットモードではテキスト入力欄も表示され、キーボードからも送信できます。
 
-## 処理パイプライン
+## システムアーキテクチャ
 
-### 翻訳モード
+### ネットワーク接続図
+
+```mermaid
+graph TD
+    %% GUI section
+    subgraph GUI ["Voice Bridge GUI (tkinter)"]
+        direction TB
+        subgraph IO [" "]
+            direction LR
+            Input[入力: マイク / システム音声] --> Output[出力: スピーカー]
+        end
+    end
+
+    %% I/O connectors
+    Input -.-> AudioIO[Audio I/O]
+    AudioOut[Audio Out] -.-> Output
+
+    %% Core Logic section
+    subgraph AppLogic ["Voice Bridge App Logic"]
+        direction TB
+
+        subgraph Detection [" "]
+            direction LR
+            VAD["Silero VAD<br/>(発話検出)"]
+            Whisper["Faster-Whisper<br/>(音声認識)"]
+            Moonshine["Moonshine<br/>(軽量ASR)"]
+        end
+
+        VAD & Whisper & Moonshine --> Process["翻訳モード /<br/>チャットモード処理"]
+    end
+
+    %% I/O to Logic
+    AudioIO ==> VAD
+
+    %% External Services
+    Process ==> GoogleTrans["Google Translate<br/>(翻訳モード)<br/>↓<br/>翻訳結果"]
+    Process ==> Ollama["Ollama LLM Server<br/>(チャットモード)<br/>localhost:11434<br/>↓<br/>LLM応答 streaming"]
+
+    %% Translation mode path
+    subgraph TTSTrans ["TTS 音声合成"]
+        direction TB
+        TTS_Options1["CoeiroInk ネット<br/>VOICEVOX ローカル<br/>Edge TTS ネット"]
+    end
+    GoogleTrans ==> TTSTrans
+    TTSTrans ==> Play1["再生<br/>スピーカー"]
+
+    %% Chat mode path
+    subgraph TTSChat ["TTS 音声合成"]
+        direction TB
+        TTS_Options2["CoeiroInk ネット<br/>VOICEVOX ローカル<br/>Edge TTS ネット"]
+    end
+    Ollama ==> TTSChat
+    TTSChat ==> Play2["再生<br/>スピーカー<br/>ダブルバッファリング"]
+
+    %% Final output
+    Play1 ==> AudioOut
+    Play2 ==> AudioOut
+
+    %% Styling
+    style GUI fill:#e0f7fa,stroke:#006064,stroke-width:2px
+    style AppLogic fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style GoogleTrans fill:#e8f5e9,stroke:#1b5e20,stroke-width:1px
+    style Ollama fill:#ede7f6,stroke:#311b92,stroke-width:2px
+    style TTSTrans fill:#fffde7,stroke:#fbc02d,stroke-width:1px
+    style TTSChat fill:#fffde7,stroke:#fbc02d,stroke-width:1px
+    style Play1 fill:#eeeeee,stroke:#616161,stroke-width:1px
+    style Play2 fill:#eeeeee,stroke:#616161,stroke-width:1px
+    style IO fill:none,stroke:none
+    style Detection fill:none,stroke:none
+    style TTS_Options1 fill:none,stroke:none
+    style TTS_Options2 fill:none,stroke:none
+```
+
+### 処理パイプライン
+
+#### 翻訳モード
 
 ```
 音声キャプチャ → ASR認識 → Google翻訳 → TTS音声合成 → 再生
 ```
 
-### チャットモード
+#### チャットモード（Ollamaを利用）
 
 ```
-マイク → VAD発話検出 → ASR認識 → LLM応答(streaming) → TTS文単位合成 → 再生
-                                     ↓                      ↓
-                               1文目を再生しながら      2文目を合成
-                              （ダブルバッファリング）
+マイク → VAD発話検出 → ASR認識 → Ollama LLM応答(streaming)
+                                    ↓
+                         TTS文単位合成 → 再生
+                          ↓                ↓
+                    1文目を再生しながら   2文目を合成
+                    （ダブルバッファリング）
 ```
 
 チャットモードでは以下の最適化により低遅延を実現しています。
