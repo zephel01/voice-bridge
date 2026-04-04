@@ -48,6 +48,27 @@
 
 ---
 
+## ⚡ 重要：翻訳モードではLLMは不要です
+
+**翻訳モードの処理フロー：**
+```
+マイク/システム音声
+  ↓
+ASR（Whisper/Moonshine）← LLM不要
+  ↓
+Google Translate
+  ↓
+TTS（VOICEVOX/CoeiroInk/Edge TTS）
+```
+
+翻訳はGoogle Translateが処理するため、**ローカルLLM（Ollama等）は一切必要ありません。**
+
+- 翻訳精度は **ASR（音声認識）** に依存
+- チャットモードのようなLLMセットアップは不要
+- メモリ効率が非常に高い
+
+---
+
 ## 必須準備
 
 翻訳モードに必須の準備は OS ごとに異なります。
@@ -240,6 +261,69 @@ Whisper 選択時に表示：
 | **Edge TTS** | 汎用ナレーター | ネット接続・多言語対応 |
 
 **推奨：** VOICEVOX または CoeiroInk（ローカル実行で低遅延）
+
+---
+
+## 💾 メモリ別推奨構成（翻訳モード）
+
+翻訳モードはLLMが不要なため、メモリ使用量が非常に少ないです。
+
+### 8GB メモリ以下
+
+**最軽量構成（推奨）：**
+```bash
+python main.py --mode translate \
+  --asr whisper --model tiny \
+  --source-lang en --target-lang ja \
+  --voicevox
+```
+
+**メモリ使用量：** 2-3GB
+- OS：2-3GB
+- Whisper tiny：1GB
+- TTS：0.5GB
+
+**おまけ情報：**
+- チャットモードなら `qwen2.5:7b-instruct` が必要（5GB）
+- 翻訳モード単体なら **LLM不要** ✅
+
+### 16GB メモリ
+
+**バランス構成（推奨）：**
+```bash
+python main.py --mode translate \
+  --asr whisper --model small \
+  --source-lang en --target-lang ja \
+  --voicevox
+```
+
+**メモリ使用量：** 4-5GB
+- OS：2-3GB
+- Whisper small：2GB
+- TTS：0.5GB
+
+**複数タスクを兼用する場合：**
+- 翻訳のみ：4-5GB（メモリ余裕あり）
+- 翻訳+チャット：9-12GB（LLM 7B追加時）
+
+### 32GB 以上
+
+**高精度構成（推奨）：**
+```bash
+python main.py --mode translate \
+  --asr whisper --model medium \
+  --source-lang en --target-lang ja \
+  --coeiroink
+```
+
+**メモリ使用量：** 6-7GB
+- OS：2-3GB
+- Whisper medium：5GB
+- TTS：0.5GB
+
+**複数タスク兼用：**
+- 翻訳のみ：6-7GB
+- 翻訳+チャット最高性能：16-20GB（LLM 14B追加時）
 
 ---
 

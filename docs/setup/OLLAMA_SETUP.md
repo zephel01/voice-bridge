@@ -23,30 +23,73 @@ Voice Bridge のチャットモードでは、Ollama がバックグラウンド
 
 [Ollama 公式サイト](https://ollama.com/) から、ご使用のOS（macOS / Windows / Linux）に対応したインストーラをダウンロードしてください。
 
-### 2. LLM モデルをダウンロード
+### 2. LLM モデルをダウンロード（メモリ別推奨）
 
-Ollama をインストール後、ターミナルでモデルをダウンロードします：
+ご利用のメモリサイズに合わせてモデルを選択してください。
+
+#### 📌 メモリ 8GB 以下
+
+限られたメモリでも会話可能です。以下から選択：
 
 ```bash
-# 推奨：日本語対応、バランスの取れた 9B モデル
-ollama pull gemma-2-9b-it
+# 推奨：日本語対応・軽量（4GB メモリ推奨）
+ollama pull qwen2.5:7b-instruct
 
-# または軽量な 7B モデル（低スペック環境向け）
-ollama pull qwen2.5-7b-instruct
-
-# または高精度な 14B モデル（メモリ8GB+推奨）
-ollama pull qwen2.5-14b-instruct
+# または超軽量（3GB メモリでも可）
+ollama pull phi:3              # Phi-3 Mini（2.3GB）
+ollama pull gemma:2b           # Gemma 2B（1.6GB）
+ollama pull neural-chat:7b     # Neural Chat（軽量）
 ```
 
-**モデル選択の目安：**
+| モデル | メモリ | 日本語対応 | 推奨用途 |
+|---|---|---|---|
+| `qwen2.5:7b-instruct` | ~5GB | ✅ 高 | **推奨** |
+| `phi:3` | 2.3GB | 普通 | 超軽量 |
+| `gemma:2b` | 1.6GB | 普通 | 最軽量 |
 
-| モデル | 日本語精度 | 処理速度 | メモリ | 推奨環境 |
-|---|---|---|---|---|
-| `gemma-2-9b-it` | 高 | 普通 | ~7GB | メモリ 8GB 推奨 |
-| `qwen2.5-7b-instruct` | 普通 | 最速 | ~5GB | メモリ 4GB でもOK |
-| `qwen2.5-14b-instruct` | 最高 | 遅い | ~10GB | メモリ 16GB 推奨 |
+#### 💻 メモリ 16GB
 
-**日本語チャットでの推奨：** `gemma-2-9b-it`
+**最もバランスの取れた推奨構成**
+
+```bash
+# 🎯 推奨：最新・高性能・日本語最適（7-9GB メモリ推奨）
+ollama pull qwen2.5:14b-instruct
+
+# または高速版（7GB メモリ）
+ollama pull qwen3:8b           # Qwen3 8B（最新・高速）
+
+# または新世代（7GB メモリ）
+ollama pull gemma4:9b          # Gemma4 9B（最新世代）
+ollama pull gemma3:9b          # Gemma3 9B（安定性高い）
+```
+
+| モデル | メモリ | 日本語対応 | 推奨用途 |
+|---|---|---|---|
+| `qwen2.5:14b-instruct` ⭐ | ~10GB | ✅ 最高 | **総合推奨** |
+| `qwen3:8b` | ~6GB | ✅ 高 | 高速・軽量 |
+| `gemma4:9b` | ~7GB | ✅ 高 | 新世代・高性能 |
+
+#### 🖥️ メモリ 32GB 以上
+
+最高性能・最新モデルを利用可能：
+
+```bash
+# 🎯 推奨：最新最高性能（12-15GB メモリ推奨）
+ollama pull qwen3:14b          # Qwen3 14B（最新リリース）
+
+# または超高精度（13-15GB メモリ推奨）
+ollama pull qwen2.5:32b-instruct
+
+# または超高性能・マルチモーダル（20-25GB メモリ推奨）
+ollama pull qwen3:32b          # Qwen3 32B
+ollama pull deepseek-r1:32b    # DeepSeek R1 32B
+```
+
+| モデル | メモリ | 日本語対応 | 推奨用途 |
+|---|---|---|---|
+| `qwen3:14b` ⭐ | ~10GB | ✅ 最高 | **総合推奨** |
+| `qwen2.5:32b-instruct` | ~20GB | ✅ 最高 | 超高精度 |
+| `qwen3:32b` | ~20GB | ✅ 最高 | 最高性能 |
 
 ### 3. Ollama サーバーを起動
 
@@ -58,14 +101,41 @@ ollama serve
 
 > **重要：** Voice Bridge を実行する際は、**常に Ollama サーバーが起動している状態**にしておいてください。起動していないと、チャットモードで「LLM モデル一覧が空」になったり、応答が返ってきません。
 
-### 4. Voice Bridge で使用するモデルを設定
+### 4. Voice Bridge で使用するモデルを設定（メモリ別）
 
-`.env` ファイルで、使用するモデルと接続先を指定します：
+`.env` ファイルで、ご利用のメモリに合わせてモデルを指定します：
 
+**8GB メモリの場合：**
 ```env
 AI_BASE_URL=http://localhost:11434/v1
-AI_MODEL=gemma-2-9b-it
+AI_MODEL=qwen2.5:7b-instruct     # 推奨
 AI_API_KEY=ollama
+```
+
+**16GB メモリの場合：**
+```env
+AI_BASE_URL=http://localhost:11434/v1
+AI_MODEL=qwen2.5:14b-instruct    # ⭐ 推奨（バランス型）
+AI_API_KEY=ollama
+```
+
+**32GB 以上の場合：**
+```env
+AI_BASE_URL=http://localhost:11434/v1
+AI_MODEL=qwen3:14b               # ⭐ 推奨（最新・最高性能）
+AI_API_KEY=ollama
+```
+
+**代替案：**
+```env
+# 高速重視
+AI_MODEL=qwen3:8b
+
+# 新世代試験
+AI_MODEL=gemma4:9b
+
+# 超高精度（32GB 以上推奨）
+AI_MODEL=qwen2.5:32b-instruct
 ```
 
 または、GUI のドロップダウンで実行時に選択：
@@ -75,14 +145,47 @@ python main.py --mode chat --vad
 # GUI 起動後、「LLM」ドロップダウンから使用するモデルを選択
 ```
 
-## 複数モデルの管理
+## 複数モデルの管理（メモリ別推奨）
 
-複数のモデルをダウンロードしておくと、GUI で実行時に切り替え可能です：
+複数のモデルをダウンロードしておくと、GUI で実行時に切り替え可能です。
+
+### 8GB メモリ環境での複数モデル
 
 ```bash
-ollama pull gemma-2-9b-it
-ollama pull qwen2.5-7b-instruct
-ollama pull qwen2.5-14b-instruct
+# メイン（推奨）
+ollama pull qwen2.5:7b-instruct
+
+# 軽量バックアップ
+ollama pull phi:3
+```
+
+### 16GB メモリ環境での複数モデル
+
+```bash
+# メイン（推奨）
+ollama pull qwen2.5:14b-instruct
+
+# 高速版
+ollama pull qwen3:8b
+
+# 新世代試験
+ollama pull gemma4:9b
+```
+
+### 32GB 以上メモリ環境での複数モデル
+
+```bash
+# メイン（推奨）
+ollama pull qwen3:14b
+
+# 高精度バージョン
+ollama pull qwen2.5:32b-instruct
+
+# 超高性能
+ollama pull qwen3:32b
+
+# 推論特化
+ollama pull deepseek-r1:32b
 ```
 
 その後、GUI の「LLM」ドロップダウンで任意のモデルを選択できます。

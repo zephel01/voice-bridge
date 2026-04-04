@@ -16,12 +16,22 @@ Voice Bridge のドキュメントは以下のカテゴリで整理されてい�
 
 ## セットアップ・インストール
 
-OS ごとのセットアップ方法とインストールガイドです。
+### メモリ別セットアップ
+
+**ご利用のメモリサイズに合わせてモデルを選択します：**
+
+- **[メモリ別セットアップガイド](./setup/MEMORY_REQUIREMENTS.md)** ⭐
+  - 8GB 以下の推奨モデル
+  - 16GB の推奨モデル
+  - 32GB 以上の推奨モデル
+
+### OS ごとのセットアップ
 
 | ドキュメント | 説明 |
 |---|---|
 | [BlackHole クイックスタート](./setup/BLACKHOLE_QUICK_START.md) | macOS の音声キャプチャ設定（5分） |
 | [BlackHole 詳細マニュアル](./setup/BLACKHOLE_MANUAL.md) | macOS の詳細なセットアップ方法 |
+| [Ollama セットアップガイド](./setup/OLLAMA_SETUP.md) | ローカル LLM サーバーのセットアップ |
 
 > 🔗 **各 OS の詳細インストールガイド**
 > - macOS: [BlackHole クイックスタート](./setup/BLACKHOLE_QUICK_START.md)
@@ -32,10 +42,21 @@ OS ごとのセットアップ方法とインストールガイドです。
 
 アプリの使い方や設定方法です。
 
+### モード別ガイド
+
 | ドキュメント | 説明 |
 |---|---|
-| GUI ガイド | GUI でモード・エンジン・モデルを切り替える方法 |
-| CLI リファレンス | コマンドラインオプション一覧 |
+| [モード選択ガイド](./guides/MODES_OVERVIEW.md) | チャット vs 翻訳の選択 |
+| [チャットモード完全ガイド](./guides/CHAT_MODE_GUIDE.md) | チャットモードの詳細 |
+| [翻訳モード完全ガイド](./guides/TRANSLATE_MODE_GUIDE.md) | 翻訳モードの詳細 |
+| [翻訳モード メモリ別ガイド](./guides/TRANSLATE_MODE_MEMORY_GUIDE.md) | 翻訳モードのメモリ別セットアップ |
+
+### その他のガイド
+
+| ドキュメント | 説明 |
+|---|---|
+| [GUI ガイド](./guides/GUI_GUIDE.md) | GUI でモード・エンジン・モデルを切り替える方法 |
+| [CLI リファレンス](../reference/CLI_REFERENCE.md) | コマンドラインオプション一覧 |
 
 ## トラブルシューティング
 

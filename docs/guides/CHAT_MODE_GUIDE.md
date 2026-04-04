@@ -46,11 +46,26 @@ Voice Bridge がローカル LLM サーバーと通信して、AI 応答を生�
 2. LLM モデルをダウンロード
 3. Ollama サーバーを起動
 
-**推奨モデル：**
+**推奨モデル（メモリ別・2026年4月版）：**
+
+**8GB メモリ以下：**
 ```bash
-ollama pull gemma-2-9b-it  # 日本語対応・バランス型（推奨）
-ollama pull qwen2.5-7b-instruct  # 軽量・高速
-ollama pull qwen2.5-14b-instruct  # 高精度・重い
+ollama pull qwen2.5:7b-instruct   # 推奨
+ollama pull phi:3                 # 超軽量版
+```
+
+**16GB メモリ：**
+```bash
+ollama pull qwen2.5:14b-instruct  # ⭐ 推奨：バランス最適
+ollama pull qwen3:8b              # 高速版
+ollama pull gemma4:9b             # 新世代
+```
+
+**32GB 以上：**
+```bash
+ollama pull qwen3:14b             # ⭐ 推奨：最新・最高性能
+ollama pull qwen2.5:32b-instruct  # 超高精度
+ollama pull qwen3:32b             # 超高性能
 ```
 
 > **重要：** Voice Bridge を使う際は、常に Ollama サーバーが起動している状態にしてください。
@@ -191,13 +206,27 @@ Silero VAD により発話終了を 0.8s で自動検出します。
 
 ダウンロード済みモデルの一覧から選択します。
 
-**モデル選択の目安：**
+**モデル選択の目安（メモリ別・2026年4月版）：**
 
-| モデル | 日本語精度 | 速度 | メモリ | 推奨用途 |
+**8GB メモリ以下：**
+| モデル | 日本語精度 | 速度 | メモリ |
+|---|---|---|---|
+| `qwen2.5:7b-instruct` | 普通 | 最速 | ~5GB |
+| `phi:3` | 普通 | 高速 | 2.3GB |
+
+**16GB メモリ：**
+| モデル | 日本語精度 | 速度 | メモリ | 推奨 |
 |---|---|---|---|---|
-| `gemma-2-9b-it` | 高 | 普通 | ~7GB | **総合推奨** |
-| `qwen2.5-7b-instruct` | 普通 | 最速 | ~5GB | 低スペック環境 |
-| `qwen2.5-14b-instruct` | 最高 | 遅い | ~10GB | 高精度重視 |
+| `qwen2.5:14b-instruct` ⭐ | 最高 | 普通 | ~10GB | **推奨** |
+| `qwen3:8b` | 高 | 高速 | ~6GB | 高速版 |
+| `gemma4:9b` | 高 | 高速 | ~7GB | 新世代 |
+
+**32GB 以上：**
+| モデル | 日本語精度 | 速度 | メモリ | 推奨 |
+|---|---|---|---|---|
+| `qwen3:14b` ⭐ | 最高 | 普通 | ~10GB | **総合推奨** |
+| `qwen2.5:32b-instruct` | 最高 | 普通 | ~20GB | 超高精度 |
+| `qwen3:32b` | 最高 | 普通 | ~20GB | 超高性能 |
 
 > **モデル一覧が空の場合：**
 > Ollama が起動していないか、モデルがダウンロードされていません。
