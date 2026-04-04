@@ -58,27 +58,37 @@ sudo apt install portaudio19-dev python3-tk
 sudo dnf install portaudio-devel python3-tkinter
 ```
 
-### 2. セットアップ（OS別）
+### 2. セットアップ（モード別）
 
-OS ごとに異なる設定があります。以下の該当ドキュメントをご参照ください：
+**チャットモードを使う場合：**
 
-- **macOS** → [BlackHole クイックスタート](./docs/setup/BLACKHOLE_QUICK_START.md)
-- **Windows** → [インストールガイド](./docs/setup/INSTALL.md)
-- **Linux** → [インストールガイド](./docs/setup/LINUX_INSTALL.md)
-
-### 3. ローカル LLM の準備（チャットモード用）
-
-チャットモードには Ollama などのローカル LLM サーバーが必要です。
-
-**ご利用のメモリに合わせてモデルを選択してください：**
+ローカル LLM（Ollama）が必要です。メモリ別推奨モデル：
 
 - **8GB 以下** → `qwen2.5:7b-instruct`（推奨）
 - **16GB** → `qwen2.5:14b-instruct`（推奨）
 - **32GB 以上** → `qwen3:14b`（推奨・最新）
 
-詳しくは [Ollama セットアップガイド](./docs/setup/OLLAMA_SETUP.md) をご覧ください。
+詳細ガイド：
+- [チャットモード完全ガイド](./docs/guides/CHAT_MODE_GUIDE.md)
+- [メモリ別セットアップガイド](./docs/setup/MEMORY_REQUIREMENTS.md)
+- [Ollama セットアップガイド](./docs/setup/OLLAMA_SETUP.md)
 
-### 4. 起動
+**翻訳モードを使う場合：**
+
+⚡ **LLM は不要です**。ASR（音声認識）+ Google Translate で動作します。
+
+OS ごとのセットアップ：
+- **macOS** → [BlackHole クイックスタート](./docs/setup/BLACKHOLE_QUICK_START.md)
+- **Windows** → WASAPI ループバック（自動対応）
+- **Linux** → [Linux トラブルシューティング](./docs/troubleshooting/LINUX_TROUBLESHOOTING.md)
+
+詳細ガイド：
+- [翻訳モード完全ガイド](./docs/guides/TRANSLATE_MODE_GUIDE.md)
+- [翻訳モード メモリ別ガイド](./docs/guides/TRANSLATE_MODE_MEMORY_GUIDE.md)
+
+**どちらか迷っている場合：** [モード選択ガイド](./docs/guides/MODES_OVERVIEW.md)
+
+### 3. 起動
 
 ```bash
 # 翻訳モード（GUI）
