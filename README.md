@@ -26,6 +26,18 @@
 - macOS 10.12+ / Windows 10・11 / Linux（PulseAudio or PipeWire）
 - メモリ 4GB以上（8GB推奨）
 
+## 📌 モードを選ぶ
+
+Voice Bridge には2つのモードがあります。使用目的に応じて選択してください：
+
+| 目的 | ガイド | 難易度 |
+|---|---|---|
+| **💬 AI と会話したい** | [チャットモード完全ガイド](./docs/guides/CHAT_MODE_GUIDE.md) | 🟡 中 |
+| **🌍 動画・会議を翻訳したい** | [翻訳モード完全ガイド](./docs/guides/TRANSLATE_MODE_GUIDE.md) | 🟢 簡単 |
+| **🤔 どちらか迷っている** | [モード選択ガイド](./docs/guides/MODES_OVERVIEW.md) | — |
+
+---
+
 ## クイックスタート
 
 ### 1. インストール
