@@ -115,7 +115,7 @@ graph TD
 
 | コンポーネント | 技術 | 説明 |
 |---|---|---|
-| 音声認識 | Faster-Whisper / Moonshine / Qwen3-ASR | 音声 → テキスト（7言語対応・自動検出） |
+| 音声認識 | Faster-Whisper / Moonshine / Qwen3-ASR | 音声 → テキスト（Qwen3-ASR は52言語対応・自動検出） |
 | 発話検出 | Silero VAD / RMS | 自然な発話終了検出 |
 
 ### 翻訳・AI

@@ -42,7 +42,7 @@ python main.py --asr whisper
 # Moonshine を使用（英語向け、高速）
 python main.py --asr moonshine --chunk 2.0
 
-# Qwen3-ASR を使用（全7言語対応・自動検出対応）
+# Qwen3-ASR を使用（52言語対応・自動検出対応）
 python main.py --asr qwen3
 ```
 
@@ -50,7 +50,7 @@ python main.py --asr qwen3
 |---|---|---|---|---|
 | `whisper` | 高 | 高 | 普通 | 日本語チャット・翻訳全般 |
 | `moonshine` | 低 | 高 | 最速 | 英語チャット・英語翻訳 |
-| `qwen3` | 高 | 高 | 普通 | 多言語翻訳・自動言語検出 |
+| `qwen3` | 高 | 高 | 普通 | 多言語翻訳・自動言語検出（52言語対応） |
 
 #### `--model {tiny,small,medium}`
 

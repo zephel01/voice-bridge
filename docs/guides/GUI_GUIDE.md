@@ -68,7 +68,7 @@ python main.py --mode chat --vad
 | Whisper（small） | 高 | 高 | 普通 | 日本語チャット・翻訳全般 |
 | Whisper（medium） | 最高 | 最高 | 遅い | 高精度が必要な場合 |
 | Moonshine | 低 | 高 | 最速 | 英語チャット・英語翻訳 |
-| Qwen3-ASR | 高 | 高 | 普通 | 多言語翻訳・自動言語検出 |
+| Qwen3-ASR | 高 | 高 | 普通 | 多言語翻訳・自動言語検出（52言語対応） |
 
 ### VAD（音声アクティビティ検出）
 
