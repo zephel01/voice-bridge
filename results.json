@@ -1,0 +1,80 @@
+[
+  {
+    "engine": "whisper",
+    "language": "en",
+    "device": "cpu",
+    "model_size": "small",
+    "audio_duration_sec": 8.184,
+    "available": true,
+    "error": null,
+    "load_time_sec": 0.601,
+    "memory_delta_mb": 748.4,
+    "latencies_sec": [
+      1.2504,
+      1.2531,
+      1.2564,
+      1.2539,
+      1.2548
+    ],
+    "avg_latency_sec": 1.2537,
+    "min_latency_sec": 1.2504,
+    "max_latency_sec": 1.2564,
+    "std_latency_sec": 0.002,
+    "rtf_avg": 0.1532,
+    "transcribed_text": "The quick brown fox jumps over the lazy dog. Artificial intelligence is transforming how we interact with technology.",
+    "text_length": 117,
+    "consistency": 1.0
+  },
+  {
+    "engine": "moonshine",
+    "language": "en",
+    "device": "cpu",
+    "model_size": "small",
+    "audio_duration_sec": 8.184,
+    "available": true,
+    "error": null,
+    "load_time_sec": 0.396,
+    "memory_delta_mb": 870.0,
+    "latencies_sec": [
+      0.445,
+      0.4402,
+      0.4392,
+      0.4496,
+      0.4478
+    ],
+    "avg_latency_sec": 0.4444,
+    "min_latency_sec": 0.4392,
+    "max_latency_sec": 0.4496,
+    "std_latency_sec": 0.0041,
+    "rtf_avg": 0.0543,
+    "transcribed_text": "The quick brown fox jumps over the lazy dog. Artificial intelligence is transforming how we interact with technology",
+    "text_length": 116,
+    "consistency": 1.0
+  },
+  {
+    "engine": "qwen3",
+    "language": "en",
+    "device": "cpu",
+    "model_size": "small",
+    "audio_duration_sec": 8.184,
+    "available": true,
+    "error": null,
+    "load_time_sec": 4.942,
+    "memory_delta_mb": 3109.7,
+    "latencies_sec": [
+      1.1414,
+      1.1323,
+      1.1271,
+      1.1359,
+      1.1422
+    ],
+    "avg_latency_sec": 1.1358,
+    "min_latency_sec": 1.1271,
+    "max_latency_sec": 1.1422,
+    "std_latency_sec": 0.0057,
+    "rtf_avg": 0.1388,
+    "transcribed_text": "The quick brown fox jumps over the lazy dog. Artificial intelligence is transforming how we interact with technology.",
+    "text_length": 117,
+    "consistency": 1.0
+  }
+]

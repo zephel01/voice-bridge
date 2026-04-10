@@ -18,6 +18,8 @@ import re
 import numpy as np
 import threading
 
+from transcribe_result import TranscribeResult
+
 try:
     import moonshine_voice
 except ImportError:
@@ -105,7 +107,7 @@ class Transcriber:
                 print(f"[Transcriber/Moonshine] モデルロード失敗: {e}")
                 raise
 
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> TranscribeResult:
         """
         音声データからテキストを生成する（faster-whisper 互換インターフェース）
 
@@ -114,7 +116,8 @@ class Transcriber:
             sample_rate: サンプルレート
 
         Returns:
-            認識されたテキスト
+            TranscribeResult: 認識テキスト（str互換）+ detected_language
+                              ※ Moonshine は言語検出非対応のため detected_language=None
         """
         self.load_model()
 
@@ -134,7 +137,7 @@ class Transcriber:
             )
         except Exception as e:
             print(f"[Transcriber/Moonshine] 認識エラー: {e}")
-            return ""
+            return TranscribeResult("")
 
         # TranscriptLine のリストからテキストを結合
         text_parts = []
@@ -150,21 +153,20 @@ class Transcriber:
                     f"[Transcriber/Moonshine] 重複行検出（スキップ）: {text[:50]}..."
                 )
 
-        result = " ".join(text_parts)
+        result_text = " ".join(text_parts)
 
         # 日本語後処理: 文字間の不要なスペースを除去
-        # Moonshine は日本語を1文字ずつスペース区切りで出力することがある
-        # 例: "い 夜 景 が 綺 ?" → "い夜景が綺?"
-        result = self._clean_japanese_text(result)
+        result_text = self._clean_japanese_text(result_text)
 
         # ハルシネーションチェック
-        if self._is_hallucination(result):
+        if self._is_hallucination(result_text):
             print(
-                f"[Transcriber/Moonshine] ハルシネーション検出（スキップ）: {result[:80]}"
+                f"[Transcriber/Moonshine] ハルシネーション検出（スキップ）: {result_text[:80]}"
             )
-            return ""
+            return TranscribeResult("")
 
-        return result
+        # Moonshine は言語検出非対応なので detected_language=None
+        return TranscribeResult(result_text, detected_language=None)
 
     @staticmethod
     def _clean_japanese_text(text: str) -> str:
@@ -234,7 +236,19 @@ class Transcriber:
             )
 
     def set_language(self, language: str) -> bool:
-        """認識言語を変更（言語変更時にモデルを再ロード）"""
+        """認識言語を変更（言語変更時にモデルを再ロード）
+
+        ※ Moonshine は言語自動検出非対応。"auto" を指定した場合は
+        英語（en）にフォールバックし、警告を表示する。
+        """
+        if language == "auto":
+            print(
+                f"[Transcriber/Moonshine] ⚠ Moonshine は言語自動検出に非対応です。"
+                f"英語（en）にフォールバックします。"
+                f"自動検出を使うには --asr whisper または --asr qwen3 を指定してください。"
+            )
+            language = "en"
+
         if language not in self.SUPPORTED_LANGUAGES:
             print(f"[Transcriber/Moonshine] サポートされていない言語: {language}")
             print(

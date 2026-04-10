@@ -11,6 +11,8 @@ try:
 except ImportError:
     raise ImportError("faster-whisper が必要です: pip install faster-whisper")
 
+from transcribe_result import TranscribeResult
+
 
 class Transcriber:
     """faster-whisper を使った複数言語音声認識"""
@@ -73,7 +75,7 @@ class Transcriber:
             )
             print(f"[Transcriber] モデルロード完了")
 
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> TranscribeResult:
         """
         音声データからテキストを生成する
 
@@ -82,7 +84,7 @@ class Transcriber:
             sample_rate: サンプルレート
 
         Returns:
-            認識されたテキスト
+            TranscribeResult: 認識テキスト（str互換）+ detected_language, language_prob
         """
         self.load_model()
 
@@ -96,14 +98,19 @@ class Transcriber:
             audio = audio / max_val * 0.95  # クリッピング防止
 
         # 音声認識実行
+        # language=None の場合、faster-whisper が自動検出する
         # VAD フィルタは無効化（audio_capture 側で既に音声検出を行っているため）
-        # 重複VAD処理による無音繰り返し問題を解決
+        lang_param = None if self.language == "auto" else self.language
         segments, info = self._model.transcribe(
             audio,
-            language=self.language,  # 動的言語対応
+            language=lang_param,
             beam_size=5,  # 安定性重視
             vad_filter=False,  # 改善：True → False（audio_capture側で管理）
         )
+
+        # 言語検出情報を取得
+        detected_language = info.language  # faster-whisper は常に検出言語を返す
+        language_prob = info.language_probability
 
         # セグメントを結合（重複排除）
         text_parts = []
@@ -118,14 +125,14 @@ class Transcriber:
                 # 重複を検出した場合はログ出力
                 print(f"[Transcriber] 重複セグメント検出（スキップ）: {text[:50]}...")
 
-        result = " ".join(text_parts)
+        result_text = " ".join(text_parts)
 
         # ハルシネーション（幻聴）チェック
-        if self._is_hallucination(result):
-            print(f"[Transcriber] ハルシネーション検出（スキップ）: {result[:80]}")
-            return ""
+        if self._is_hallucination(result_text):
+            print(f"[Transcriber] ハルシネーション検出（スキップ）: {result_text[:80]}")
+            return TranscribeResult("", detected_language=detected_language, language_prob=language_prob)
 
-        return result
+        return TranscribeResult(result_text, detected_language=detected_language, language_prob=language_prob)
 
     def _is_hallucination(self, text: str) -> bool:
         """Whisper のハルシネーション（無音時の幻聴テキスト）を検出"""
@@ -160,7 +167,12 @@ class Transcriber:
             print(f"[Transcriber] モデルサイズを {model_size} に変更（次回ロード時に適用）")
 
     def set_language(self, language: str) -> bool:
-        """認識言語を変更"""
+        """認識言語を変更（"auto" で自動検出モード）"""
+        if language == "auto":
+            self.language = "auto"
+            print(f"[Transcriber] 認識言語を自動検出モードに変更")
+            return True
+
         if language not in self.SUPPORTED_LANGUAGES:
             print(f"[Transcriber] サポートされていない言語: {language}")
             print(f"[Transcriber] 対応言語: {', '.join(self.SUPPORTED_LANGUAGES)}")

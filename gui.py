@@ -14,6 +14,7 @@ class VoiceBridgeGUI:
 
     # 言語コード → 表示用言語名（emoji付き）のマッピング
     LANGUAGE_DISPLAY = {
+        "auto": "🔍 自動検出",
         "en": "🇺🇸 English",
         "ja": "🇯🇵 日本語",
         "zh": "🇨🇳 中国語",
@@ -25,6 +26,7 @@ class VoiceBridgeGUI:
 
     # 言語コード → ドロップダウン表示用（言語名付き）のマッピング
     LANGUAGE_DROPDOWN = {
+        "auto": "auto (自動検出)",
         "en": "en (English)",
         "ja": "ja (日本語)",
         "zh": "zh (中国語)",
@@ -34,7 +36,7 @@ class VoiceBridgeGUI:
         "ko": "ko (韓国語)",
     }
 
-    def __init__(self, on_start=None, on_stop=None, on_clear=None, on_model_change=None, on_device_change=None, on_voice_change=None, on_rate_change=None, on_language_pair_change=None, on_chat_text=None):
+    def __init__(self, on_start=None, on_stop=None, on_clear=None, on_model_change=None, on_device_change=None, on_voice_change=None, on_rate_change=None, on_language_pair_change=None, on_chat_text=None, on_chunk_duration_change=None):
         """
         Args:
             on_start: 開始ボタン押下時のコールバック
@@ -46,6 +48,7 @@ class VoiceBridgeGUI:
             on_rate_change: 速度変更時のコールバック (rate: str)
             on_language_pair_change: 言語ペア変更時のコールバック (source: str, target: str)
             on_chat_text: チャットテキスト送信時のコールバック (text: str)
+            on_chunk_duration_change: チャンク長変更時のコールバック (duration: float)
         """
         self.on_start = on_start
         self.on_stop = on_stop
@@ -56,6 +59,7 @@ class VoiceBridgeGUI:
         self.on_rate_change = on_rate_change
         self.on_language_pair_change = on_language_pair_change
         self.on_chat_text = on_chat_text
+        self.on_chunk_duration_change = on_chunk_duration_change
 
         self._message_queue: queue.Queue = queue.Queue()
         self._running = False
@@ -65,7 +69,7 @@ class VoiceBridgeGUI:
         self._source_lang_label = None  # ソース言語のテキストボックスラベル
         self._target_lang_label = None  # ターゲット言語のテキストボックスラベル
 
-    def build(self, devices: list[str] = None, voices: list[str] = None, default_voice: str = None, default_source_lang: str = "en", default_target_lang: str = "ja", default_mode: str = "translate", default_asr: str = "whisper", default_vad: bool = False, ai_models: list[str] = None, default_ai_model: str = ""):
+    def build(self, devices: list[str] = None, voices: list[str] = None, default_voice: str = None, default_source_lang: str = "en", default_target_lang: str = "ja", default_mode: str = "translate", default_asr: str = "whisper", default_vad: bool = False, ai_models: list[str] = None, default_ai_model: str = "", default_chunk_duration: float = 4.0):
         """GUI を構築"""
         self.root = tk.Tk()
         self.root.title("Voice Bridge - リアルタイム多言語翻訳")
@@ -130,9 +134,9 @@ class VoiceBridgeGUI:
         self._lang_label = ttk.Label(settings_frame, text=lang_label_text)
         self._lang_label.grid(row=2, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
 
-        # ソース言語選択
+        # ソース言語選択（"auto" = 自動検出を先頭に配置）
         self.source_lang_var = tk.StringVar(value=default_source_lang)
-        source_lang_dropdown_values = [self.LANGUAGE_DROPDOWN[lang] for lang in ["en", "ja", "zh", "es", "fr", "de", "ko"]]
+        source_lang_dropdown_values = [self.LANGUAGE_DROPDOWN[lang] for lang in ["auto", "en", "ja", "zh", "es", "fr", "de", "ko"]]
         self._source_lang_combo = ttk.Combobox(
             settings_frame, textvariable=self.source_lang_var,
             values=source_lang_dropdown_values, width=15, state="readonly"
@@ -176,7 +180,7 @@ class VoiceBridgeGUI:
         self.asr_var = tk.StringVar(value=default_asr)
         asr_combo = ttk.Combobox(
             settings_frame, textvariable=self.asr_var,
-            values=["whisper", "moonshine"], width=12, state="readonly"
+            values=["whisper", "moonshine", "qwen3"], width=12, state="readonly"
         )
         asr_combo.grid(row=3, column=3, sticky=tk.W, pady=(8, 0))
 
@@ -198,6 +202,24 @@ class VoiceBridgeGUI:
             values=model_list, width=40,
         )
         self._ai_model_combo.grid(row=4, column=1, columnspan=4, sticky=tk.W, pady=(8, 0))
+
+        # チャンク長調整スライダー（6行目に配置）
+        ttk.Label(settings_frame, text="チャンク長:").grid(row=5, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
+        self._chunk_duration_var = tk.DoubleVar(value=default_chunk_duration)
+        self._chunk_slider = tk.Scale(
+            settings_frame,
+            variable=self._chunk_duration_var,
+            from_=1.5, to=6.0, resolution=0.5,
+            orient=tk.HORIZONTAL, length=200,
+            bg="#1e1e2e", fg="#cdd6f4", troughcolor="#313244",
+            highlightthickness=0, font=("Helvetica", 10),
+            command=self._on_chunk_duration_changed,
+        )
+        self._chunk_slider.grid(row=5, column=1, columnspan=2, sticky=tk.W, pady=(8, 0))
+        self._chunk_label_var = tk.StringVar(value=f"{default_chunk_duration:.1f}秒 標準")
+        ttk.Label(settings_frame, textvariable=self._chunk_label_var,
+                  font=("Helvetica", 10), foreground="#a6adc8").grid(
+            row=5, column=3, columnspan=2, sticky=tk.W, padx=(5, 0), pady=(8, 0))
 
         # --- ボタンエリア ---
         btn_frame = ttk.Frame(main_frame)
@@ -367,13 +389,13 @@ class VoiceBridgeGUI:
             self._source_lang_combo.set(target_display)
             return
 
-        # 言語ペアの妥当性チェック
-        if source == target:
+        # 言語ペアの妥当性チェック（auto 以外で同じ言語の場合は警告）
+        if source != "auto" and source == target:
             print(f"[GUI] 警告: ソース言語とターゲット言語が同じです")
             return
 
         # テキストボックスのラベルを動的に更新
-        self._source_lang_label.configure(text=self.LANGUAGE_DISPLAY[source])
+        self._source_lang_label.configure(text=self.LANGUAGE_DISPLAY.get(source, source))
         self._target_lang_label.configure(text=self.LANGUAGE_DISPLAY[target])
 
         if self.on_language_pair_change:
@@ -405,6 +427,23 @@ class VoiceBridgeGUI:
             self._source_lang_combo.grid()
             self._lang_arrow.grid()
 
+    def _on_chunk_duration_changed(self, value=None):
+        """チャンク長スライダー変更イベント"""
+        duration = self._chunk_duration_var.get()
+        # ラベル更新：短い/長いの目安を表示
+        if duration <= 2.0:
+            hint = "短い（低遅延・認識精度↓）"
+        elif duration <= 3.0:
+            hint = "やや短い（バランス型）"
+        elif duration <= 4.0:
+            hint = "標準"
+        else:
+            hint = "長い（高精度・遅延↑）"
+        self._chunk_label_var.set(f"{duration:.1f}秒 {hint}")
+
+        if self.on_chunk_duration_change:
+            self.on_chunk_duration_change(duration)
+
     def _on_chat_submit(self, event=None):
         """チャットテキスト送信"""
         text = self._chat_entry.get().strip()
@@ -434,6 +473,7 @@ class VoiceBridgeGUI:
             "source_lang": source_lang,
             "target_lang": target_lang,
             "ai_model": self.ai_model_var.get(),
+            "chunk_duration": self._chunk_duration_var.get(),
         }
 
     def _on_close(self):
@@ -459,6 +499,13 @@ class VoiceBridgeGUI:
                     latency, stage = data
                     self._latency_var.set(f"遅延: {latency:.1f}s")
                     self._latency_detail_var.set(f"({stage})")
+                elif msg_type == "detected_lang":
+                    detected_lang, prob = data
+                    display = self.LANGUAGE_DISPLAY.get(detected_lang, detected_lang)
+                    if prob is not None:
+                        display += f" ({prob:.0%})"
+                    if self._source_lang_label:
+                        self._source_lang_label.configure(text=display)
             except queue.Empty:
                 break
         if self.root:
@@ -518,6 +565,10 @@ class VoiceBridgeGUI:
     def set_latency(self, latency: float, stage: str):
         """遅延情報を更新（スレッドセーフ）"""
         self._message_queue.put(("latency", (latency, stage)))
+
+    def set_detected_language(self, detected_lang: str, prob: float = None):
+        """自動検出された言語をラベルに反映（スレッドセーフ）"""
+        self._message_queue.put(("detected_lang", (detected_lang, prob)))
 
     def set_credit(self, text: str):
         """クレジット表記を設定"""

@@ -45,6 +45,7 @@ from tts_coeiroink import CoeiroinkTTS
 from player import AudioPlayer
 from translation_logger import TranslationLogger
 from ai_chat import AiChat, load_dotenv
+from latency_tracker import LatencyTracker
 
 # .env から環境変数をロード
 load_dotenv()
@@ -67,6 +68,7 @@ class VoiceBridge:
         use_coeiroink: bool = False,
         coeiroink_speaker_id: int = 0,
         asr_engine: str = "whisper",
+        asr_device: str = "cpu",
         mode: str = "translate",
         ai_base_url: str = "https://api.openai.com/v1",
         ai_api_key: str = None,
@@ -99,12 +101,18 @@ class VoiceBridge:
             from transcriber_moonshine import Transcriber as MoonshineTranscriber
             self.transcriber = MoonshineTranscriber(model_size=model_size, language=source_language)
             print(f"[VoiceBridge] ASR: Moonshine (language={source_language})")
+        elif asr_engine == "qwen3":
+            from transcriber_qwen3 import Transcriber as Qwen3Transcriber
+            self.transcriber = Qwen3Transcriber(model_size=model_size, language=source_language, device=asr_device)
+            print(f"[VoiceBridge] ASR: Qwen3-ASR (model={model_size}, language={source_language})")
         else:
             self.transcriber = WhisperTranscriber(model_size=model_size, language=source_language)
             print(f"[VoiceBridge] ASR: faster-whisper (model={model_size}, language={source_language})")
         # チャットモードでは翻訳不要
         if mode != "chat":
-            self.translator = Translator(source=source_language, target=target_language)
+            # auto モードでは検出前のデフォルトとして en→target で初期化
+            translator_source = "en" if source_language == "auto" else source_language
+            self.translator = Translator(source=translator_source, target=target_language)
         else:
             self.translator = None
 
@@ -154,12 +162,16 @@ class VoiceBridge:
         if enable_vad and asr_engine == "moonshine":
             self._setup_streaming_asr()
 
+        # レイテンシ計測
+        self.latency_tracker = LatencyTracker(max_history=100)
+
         # GUI コールバック用
         self.on_english_text = None
         self.on_japanese_text = None
         self.on_status_change = None
         self.on_level = None       # (rms: float, is_active: bool)
         self.on_latency = None     # (latency_sec: float, stage: str)
+        self.on_language_detected = None  # (detected_lang: str, prob: float|None)
 
         # 音声レベルコールバックを AudioCapture に接続
         self.capture.on_level = self._on_capture_level
@@ -181,7 +193,8 @@ class VoiceBridge:
     def _on_play_end(self):
         """TTS 再生終了時 — キャプチャを再開（少し待ってバッファに残るTTS音声を捨てる）"""
         # 再生終了直後のバッファにTTS音声の残りが入っている可能性があるので少し待つ
-        time.sleep(0.3)
+        # 0.5秒: BlackHole等のループバックデバイスのバッファ遅延を考慮
+        time.sleep(0.5)
         # バッファに溜まったチャンクを捨てる
         while not self.capture.audio_queue.empty():
             try:
@@ -278,36 +291,63 @@ class VoiceBridge:
                 print("[Pipeline] TTS再生中のため音声チャンクをスキップ")
                 continue
 
-            t_start = time.time()
             self._notify_status("認識中...")
 
-            # 2. 音声認識（英語テキスト化）
-            t_step = time.time()
+            # 2. 音声認識（テキスト化）
+            self.latency_tracker.start("asr")
             try:
-                english_text = self.transcriber.transcribe(audio_chunk)
+                asr_result = self.transcriber.transcribe(audio_chunk)
             except Exception as e:
                 print(f"[Pipeline] 音声認識エラー: {e}")
+                self.latency_tracker.stop("asr")
                 continue
-            t_transcribe = time.time() - t_step
+            t_transcribe = self.latency_tracker.stop("asr")
 
-            if not english_text.strip():
+            if not asr_result.strip():
                 self._notify_status("キャプチャ中...")
                 continue
 
-            source_label = self.source_language.upper()
-            print(f"[{source_label}] {english_text}")
-            if self.on_english_text:
-                self.on_english_text(english_text)
+            # 言語自動検出: source_language が "auto" の場合、検出言語で翻訳ペアを動的に切替
+            detected_lang = getattr(asr_result, "detected_language", None)
+            detected_prob = getattr(asr_result, "language_prob", None)
+            if self.source_language == "auto" and detected_lang:
+                # 診断ログ: 生の検出結果を毎回出力
+                prob_pct = f"{detected_prob:.0%}" if detected_prob is not None else "?"
+                text_preview = str(asr_result)[:60].replace("\n", " ")
+                print(f"[AutoLang] 生検出: {detected_lang}({prob_pct}) テキスト=「{text_preview}」")
+                self._auto_switch_source_language(detected_lang, detected_prob)
 
-            # 3. 翻訳
-            self._notify_status("翻訳中...")
-            t_step = time.time()
-            try:
-                translated_text = self.translator.translate(english_text)
-            except Exception as e:
-                print(f"[Pipeline] 翻訳エラー: {e}")
-                continue
-            t_translate = time.time() - t_step
+            # active_source: 確信度が閾値以上の検出言語、または Translator の現在のソース言語
+            if self.source_language == "auto":
+                if detected_lang and detected_prob is not None and detected_prob >= self.AUTO_LANG_MIN_PROB:
+                    active_source = detected_lang
+                else:
+                    # 確信度が低い → Translator の現在のソース言語を使う
+                    active_source = getattr(self.translator, "source", "en")
+            else:
+                active_source = self.source_language
+
+            source_label = (active_source or "??").upper()
+            print(f"[{source_label}] {asr_result}")
+            if self.on_english_text:
+                self.on_english_text(str(asr_result))
+
+            # 翻訳スキップ: 検出言語 == ターゲット言語の場合（確信度が高いときのみ）
+            if active_source == self.target_language:
+                print(f"[Pipeline] 検出言語({active_source})=ターゲット言語 → 翻訳スキップ")
+                translated_text = str(asr_result)
+                t_translate = 0.0
+            else:
+                # 3. 翻訳
+                self._notify_status("翻訳中...")
+                self.latency_tracker.start("translate")
+                try:
+                    translated_text = self.translator.translate(str(asr_result))
+                except Exception as e:
+                    print(f"[Pipeline] 翻訳エラー: {e}")
+                    self.latency_tracker.stop("translate")
+                    continue
+                t_translate = self.latency_tracker.stop("translate")
 
             if not translated_text.strip():
                 self._notify_status("キャプチャ中...")
@@ -320,29 +360,30 @@ class VoiceBridge:
 
             # ログ保存
             self.logger.log(
-                self.source_language, self.target_language,
-                english_text, translated_text,
+                active_source or self.source_language, self.target_language,
+                str(asr_result), translated_text,
             )
 
             # 4. 音声合成
             self._notify_status("音声合成中...")
-            t_step = time.time()
+            self.latency_tracker.start("tts")
             try:
                 audio_path = self.tts.synthesize(translated_text)
             except Exception as e:
                 print(f"[Pipeline] TTS エラー: {e}")
+                self.latency_tracker.stop("tts")
                 continue
-            t_tts = time.time() - t_step
+            t_tts = self.latency_tracker.stop("tts")
 
             if audio_path:
                 self.player.enqueue(audio_path)
 
-            t_total = time.time() - t_start
-            # チャンク蓄積時間も加算した実質遅延
-            total_with_chunk = t_total + self.capture.chunk_duration
-            print(f"[Latency] 認識={t_transcribe:.1f}s 翻訳={t_translate:.1f}s TTS={t_tts:.1f}s "
-                  f"処理計={t_total:.1f}s 実質遅延={total_with_chunk:.1f}s")
-            self._notify_latency(total_with_chunk,
+            # レイテンシ記録（チャンク蓄積時間を追加レイテンシとして加算）
+            record = self.latency_tracker.record_cycle(
+                extra_latency=self.capture.chunk_duration
+            )
+            print(self.latency_tracker.format_cycle(record))
+            self._notify_latency(record.total_sec,
                 f"認識{t_transcribe:.1f}s+翻訳{t_translate:.1f}s+TTS{t_tts:.1f}s")
 
             self._notify_status("キャプチャ中...")
@@ -775,6 +816,17 @@ class VoiceBridge:
         if was_running:
             self.capture.start()
 
+    def set_chunk_duration(self, duration: float):
+        """チャンク長を動的に変更する（秒）
+
+        AudioCapture のチャンク蓄積サイズをリアルタイムで更新。
+        短くすると低遅延だが ASR 精度が落ちる可能性あり。
+        """
+        duration = max(1.5, min(6.0, duration))  # 安全範囲にクランプ
+        self.capture.chunk_duration = duration
+        self.capture.chunk_samples = int(self.capture.sample_rate * duration)
+        print(f"[VoiceBridge] チャンク長を {duration:.1f}秒 に変更")
+
     def change_voice(self, voice_key: str):
         """声を変更する（Edge TTS の場合はキー名、VOICEVOX の場合は speaker_id）"""
         if self.use_voicevox:
@@ -788,11 +840,81 @@ class VoiceBridge:
         else:
             self.tts.set_voice(voice_key)
 
+    # --- 言語自動検出の安定化パラメータ ---
+    AUTO_LANG_MIN_PROB = 0.75        # この確信度未満の検出は無視
+    AUTO_LANG_SWITCH_COUNT = 2       # 同じ言語がこの回数連続で検出されたら切替
+
+    def _auto_switch_source_language(self, detected_lang: str, prob: float = None):
+        """自動検出されたソース言語に基づいて翻訳ペアを動的に切替
+
+        安定化のため以下のフィルタを適用:
+          1. 確信度が AUTO_LANG_MIN_PROB 未満の検出は無視
+          2. 同じ言語が AUTO_LANG_SWITCH_COUNT 回連続で検出されて初めて切替
+        """
+        # voice-bridge のサポート言語に正規化
+        supported = {"en", "ja", "zh", "es", "fr", "de", "ko"}
+        if detected_lang not in supported:
+            return
+
+        # 1. 確信度フィルタ: 閾値未満は無視（GUI 通知も控える）
+        if prob is not None and prob < self.AUTO_LANG_MIN_PROB:
+            return
+
+        # 2. 安定性フィルタ: 連続検出カウント
+        if not hasattr(self, "_auto_lang_history"):
+            self._auto_lang_history = []
+        self._auto_lang_history.append(detected_lang)
+        # 直近 N 件だけ保持
+        max_keep = self.AUTO_LANG_SWITCH_COUNT + 1
+        if len(self._auto_lang_history) > max_keep:
+            self._auto_lang_history = self._auto_lang_history[-max_keep:]
+
+        # 直近 N 件が全て同じ言語か判定
+        recent = self._auto_lang_history[-self.AUTO_LANG_SWITCH_COUNT:]
+        if len(recent) < self.AUTO_LANG_SWITCH_COUNT or len(set(recent)) != 1:
+            # まだ安定していない — GUI の確信度表示だけ更新
+            if self.on_language_detected:
+                self.on_language_detected(detected_lang, prob)
+            return
+
+        # ここに来たら安定して同じ言語が連続検出された
+        stable_lang = recent[0]
+
+        # GUI に検出言語を通知
+        if self.on_language_detected:
+            self.on_language_detected(stable_lang, prob)
+
+        # 検出言語 == ターゲット言語の場合は翻訳不要（パイプライン側でスキップする）
+        if stable_lang == self.target_language:
+            return
+
+        # 現在の Translator のソース言語と同じなら何もしない
+        current_source = getattr(self.translator, "source", None)
+        if current_source == stable_lang:
+            return
+
+        prob_str = f" ({prob:.0%})" if prob is not None else ""
+        print(f"[AutoLang] 言語確定: {stable_lang}{prob_str} ({self.AUTO_LANG_SWITCH_COUNT}回連続) → 翻訳ペアを {stable_lang}→{self.target_language} に切替")
+
+        # Translator のソース言語のみ更新（ターゲットはそのまま）
+        try:
+            self.translator.set_language_pair(stable_lang, self.target_language)
+        except Exception as e:
+            print(f"[AutoLang] 翻訳ペア切替失敗: {e}")
+
     def change_language_pair(self, source: str, target: str) -> bool:
-        """言語ペアを動的に変更"""
+        """言語ペアを動的に変更（source="auto" で自動検出モード）"""
         # Transcriber の言語変更
         if not self.transcriber.set_language(source):
             return False
+
+        # auto モードでは Translator はそのまま（検出時に動的更新される）
+        if source == "auto":
+            self.source_language = "auto"
+            self.target_language = target
+            self.tts_language = target
+            print(f"[VoiceBridge] 言語ペアを auto→{target} に変更（検出時に自動切替）")
+            return True
 
         # Translator の言語ペア変更
         if not self.translator.set_language_pair(source, target):
@@ -839,6 +961,7 @@ def run_cli(args):
         use_coeiroink=use_coeiroink,
         coeiroink_speaker_id=args.coeiroink_speaker_id if use_coeiroink else 0,
         asr_engine=args.asr,
+        asr_device=args.asr_device,
         mode=args.mode,
         ai_base_url=args.ai_base_url,
         ai_model=args.ai_model,
@@ -965,12 +1088,13 @@ def run_gui(args):
             target_language=settings["target_lang"],
             tts_language=settings["target_lang"],
             voice=args.voice,
-            chunk_duration=args.chunk,
+            chunk_duration=settings.get("chunk_duration", args.chunk),
             use_coeiroink=coeiroink_available,
             coeiroink_speaker_id=default_coeiroink_id,
             use_voicevox=voicevox_available,
             voicevox_speaker_id=default_speaker_id,
             asr_engine=asr,
+            asr_device=args.asr_device,
             mode=mode,
             ai_base_url=args.ai_base_url,
             ai_model=settings.get("ai_model") or args.ai_model,
@@ -983,6 +1107,7 @@ def run_gui(args):
         bridge.on_status_change = gui.set_status
         bridge.on_level = gui.set_level
         bridge.on_latency = gui.set_latency
+        bridge.on_language_detected = gui.set_detected_language
 
         bridge_holder["bridge"] = bridge
         return bridge
@@ -1049,6 +1174,11 @@ def run_gui(args):
         if bridge_holder["bridge"]:
             bridge_holder["bridge"].chat_text(text)
 
+    # チャンク長変更のコールバック
+    def on_chunk_duration_change(duration: float):
+        if bridge_holder["bridge"]:
+            bridge_holder["bridge"].set_chunk_duration(duration)
+
     gui = VoiceBridgeGUI(
         on_start=on_start,
         on_stop=on_stop,
@@ -1058,6 +1188,7 @@ def run_gui(args):
         on_voice_change=on_voice_change,
         on_language_pair_change=on_language_pair_change,
         on_chat_text=on_chat_text,
+        on_chunk_duration_change=on_chunk_duration_change,
     )
 
     # 声のリストを構築
@@ -1082,6 +1213,7 @@ def run_gui(args):
         default_vad=args.vad,
         ai_models=ai_models,
         default_ai_model=args.ai_model,
+        default_chunk_duration=args.chunk,
     )
 
     # TTS クレジット表記
@@ -1102,15 +1234,17 @@ def main():
     )
     parser.add_argument("--cli", action="store_true", help="CLI モードで起動（デバッグ用）")
     parser.add_argument("--list-devices", action="store_true", help="入力デバイス一覧を表示")
-    parser.add_argument("--asr", default="whisper", choices=["whisper", "moonshine"],
+    parser.add_argument("--asr", default="whisper", choices=["whisper", "moonshine", "qwen3"],
                         help="ASR エンジン (default: whisper)")
     parser.add_argument("--device", default=DEFAULT_DEVICE,
                         help=f"入力デバイス名 (default: {DEFAULT_DEVICE})")
+    parser.add_argument("--asr-device", default="cpu", choices=["cpu", "cuda"],
+                        help="ASR 推論デバイス (default: cpu, Qwen3-ASR では cuda 推奨)")
     parser.add_argument("--model", default="small", choices=["tiny", "base", "small", "medium"],
                         help="Whisper モデルサイズ（moonshine 使用時は無視）")
     parser.add_argument("--source-lang", default="en",
-                        choices=["en", "ja", "zh", "es", "fr", "de", "ko"],
-                        help="認識言語 (default: en)")
+                        choices=["auto", "en", "ja", "zh", "es", "fr", "de", "ko"],
+                        help="認識言語 (default: en, auto=自動検出)")
     parser.add_argument("--target-lang", default="ja",
                         choices=["en", "ja", "zh", "es", "fr", "de", "ko"],
                         help="翻訳言語 (default: ja)")

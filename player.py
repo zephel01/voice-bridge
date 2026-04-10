@@ -22,6 +22,9 @@ class AudioPlayer:
         self._running = False
         self._thread = None
         self._initialized = False
+        # フィードバックループ防止コールバック（VoiceBridge が設定する）
+        self.on_play_start = None  # () -> None
+        self.on_play_end = None    # () -> None
 
     def _init_mixer(self):
         """pygame mixer を初期化"""
@@ -44,12 +47,20 @@ class AudioPlayer:
 
             try:
                 if os.path.exists(file_path):
+                    # 再生開始を通知（キャプチャ抑制）
+                    if self.on_play_start:
+                        self.on_play_start()
+
                     pygame.mixer.music.load(file_path)
                     pygame.mixer.music.play()
 
                     # 再生完了を待つ
                     while pygame.mixer.music.get_busy() and self._running:
                         time.sleep(0.1)
+
+                    # 再生終了を通知（キャプチャ再開）
+                    if self.on_play_end:
+                        self.on_play_end()
 
                     # 再生済みファイルを削除
                     try:
@@ -58,6 +69,9 @@ class AudioPlayer:
                         pass
             except Exception as e:
                 print(f"[AudioPlayer] 再生エラー: {e}")
+                # エラー時もフラグを確実に解除
+                if self.on_play_end:
+                    self.on_play_end()
 
     def start(self):
         """再生スレッドを開始"""

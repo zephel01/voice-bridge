@@ -13,12 +13,16 @@
 - Silero VAD による自然な発話検出
 - LLM ストリーミング + TTS ダブルバッファリングで低遅延応答
 - GUI でモード・ASR エンジン・LLM モデルを切り替え可能
+- Qwen3-ASR エンジン対応（全7言語 + 自動言語検出）
+- 言語自動検出（ソース言語の自動判定・動的切替）
+- GUI チャンク長スライダーで遅延調整可能
+- パイプラインレイテンシのリアルタイム計測・表示
 
 ## 対応言語
 
 英語 / 日本語 / 中国語 / スペイン語 / フランス語 / ドイツ語 / 韓国語
 
-> **Note:** Moonshine エンジン使用時は en / ja / zh / es / ko の5言語に対応（fr, de は未対応）。
+> **Note:** Moonshine エンジン使用時は en / ja / zh / es / ko の5言語に対応（fr, de は未対応）。Qwen3-ASR は全7言語に対応し、言語自動検出もサポートしています。
 
 ## 対応環境
 
@@ -99,6 +103,12 @@ python main.py --mode chat --vad
 
 # リリンちゃんでチャット（CoeiroInk）
 python main.py --mode chat --vad --coeiroink
+
+# 自動言語検出で翻訳
+python main.py --source-lang auto
+
+# Qwen3-ASR で起動
+python main.py --asr qwen3
 ```
 
 詳しいオプションは [CLI リファレンス](./docs/reference/CLI_REFERENCE.md) をご覧ください。
@@ -106,6 +116,8 @@ python main.py --mode chat --vad --coeiroink
 ## GUI の使い方
 
 すべての設定はドロップダウンで変更できます。詳しくは [GUI ガイド](./docs/guides/GUI_GUIDE.md) をご覧ください。
+
+GUI では ASR エンジン（Whisper / Moonshine / Qwen3）の切り替え、ソース言語の自動検出設定、チャンク長の調整がリアルタイムで行えます。
 
 ## システムアーキテクチャ
 

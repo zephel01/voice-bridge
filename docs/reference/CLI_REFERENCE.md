@@ -31,7 +31,7 @@ python main.py --mode chat
 
 ### 音声認識（ASR）エンジン
 
-#### `--asr {whisper,moonshine}`
+#### `--asr {whisper,moonshine,qwen3}`
 
 音声認識エンジンを指定します。デフォルトは `whisper` です。
 
@@ -41,12 +41,16 @@ python main.py --asr whisper
 
 # Moonshine を使用（英語向け、高速）
 python main.py --asr moonshine --chunk 2.0
+
+# Qwen3-ASR を使用（全7言語対応・自動検出対応）
+python main.py --asr qwen3
 ```
 
 | 値 | 日本語精度 | 英語精度 | 速度 | 推奨用途 |
 |---|---|---|---|---|
 | `whisper` | 高 | 高 | 普通 | 日本語チャット・翻訳全般 |
 | `moonshine` | 低 | 高 | 最速 | 英語チャット・英語翻訳 |
+| `qwen3` | 高 | 高 | 普通 | 多言語翻訳・自動言語検出 |
 
 #### `--model {tiny,small,medium}`
 
@@ -69,17 +73,28 @@ python main.py --model medium
 | `small` | 2GB | 高 | 高速 |
 | `medium` | 5GB | 最高 | 普通 |
 
+#### `--asr-device {cpu,cuda}`
+
+Qwen3-ASR の実行デバイスを指定します。デフォルトは `cpu` です。
+
+```bash
+# GPU で Qwen3-ASR を実行
+python main.py --asr qwen3 --asr-device cuda
+```
+
 #### `--chunk FLOAT`
 
-Moonshine のチャンクサイズ（秒数）を指定します。デフォルトは `1.0` です。
+音声チャンク長（秒数）を指定します。デフォルトは `4.0` です。GUI のスライダーでもリアルタイムに変更可能です。
 
 ```bash
 # チャンクサイズ 2.0s（低遅延）
-python main.py --asr moonshine --chunk 2.0
+python main.py --chunk 2.0
 
-# チャンクサイズ 0.5s（高精度）
-python main.py --asr moonshine --chunk 0.5
+# チャンクサイズ 5.0s（高精度）
+python main.py --chunk 5.0
 ```
+
+短いチャンクは低遅延ですが ASR 精度が低下する可能性があります。話者のペースに合わせて調整してください。
 
 ### 言語設定
 
@@ -90,6 +105,8 @@ python main.py --asr moonshine --chunk 0.5
 ```bash
 python main.py --mode translate --source-lang ja --target-lang en
 ```
+
+`auto` を指定すると、Whisper または Qwen3-ASR の言語検出機能を使い、ソース言語を自動判定します。Moonshine は自動検出に対応していません。
 
 #### `--target-lang LANGUAGE`
 
@@ -264,6 +281,16 @@ python main.py --device "USB Microphone"
 
 # 特定のループバックデバイスを指定
 python main.py --device "Monitor of Built-in Audio"
+```
+
+### 自動言語検出
+
+```bash
+# 言語自動検出で翻訳（Whisper）
+python main.py --mode translate --source-lang auto --target-lang ja
+
+# Qwen3-ASR + 自動言語検出
+python main.py --mode translate --asr qwen3 --source-lang auto --target-lang ja
 ```
 
 ## 環境変数

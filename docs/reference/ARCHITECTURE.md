@@ -28,9 +28,10 @@ graph TD
             VAD["Silero VAD<br/>(発話検出)"]
             Whisper["Faster-Whisper<br/>(音声認識)"]
             Moonshine["Moonshine<br/>(軽量ASR)"]
+            Qwen3["Qwen3-ASR<br/>(多言語ASR)"]
         end
 
-        VAD & Whisper & Moonshine --> Process["翻訳モード /<br/>チャットモード処理"]
+        VAD & Whisper & Moonshine & Qwen3 --> Process["翻訳モード /<br/>チャットモード処理"]
     end
 
     %% I/O to Logic
@@ -84,7 +85,7 @@ graph TD
 ```
 
 1. **音声キャプチャ** — システム音声またはマイク入力を録音
-2. **ASR認識** — Faster-Whisper または Moonshine で音声をテキスト化
+2. **ASR認識** — Faster-Whisper、Moonshine、または Qwen3-ASR で音声をテキスト化（自動言語検出対応）
 3. **Google翻訳** — deep-translator を使用して翻訳
 4. **TTS音声合成** — CoeiroInk / VOICEVOX / Edge TTS で読み上げ
 5. **再生** — スピーカーから出力
@@ -114,7 +115,7 @@ graph TD
 
 | コンポーネント | 技術 | 説明 |
 |---|---|---|
-| 音声認識 | Faster-Whisper / Moonshine | 音声 → テキスト |
+| 音声認識 | Faster-Whisper / Moonshine / Qwen3-ASR | 音声 → テキスト（7言語対応・自動検出） |
 | 発話検出 | Silero VAD / RMS | 自然な発話終了検出 |
 
 ### 翻訳・AI
@@ -147,6 +148,20 @@ graph TD
 |---|---|
 | tkinter | GUI フレームワーク |
 
+## 新機能（v4）
+
+### 言語自動検出
+ソース言語を `auto` に設定すると、ASR が検出した言語に応じて翻訳ペアを動的に切り替えます。安定化のため、75% 以上の確信度で2回連続同一言語を検出した場合のみ切替が行われます。Whisper と Qwen3-ASR で利用可能です。
+
+### TTS フィードバックループ防止
+BlackHole 等のループバックデバイス使用時、TTS 再生音が ASR に再入力されるフィードバックループを防止します。TTS 再生中はキャプチャを抑制し、再生後にバッファをフラッシュします。
+
+### レイテンシ計測
+パイプラインの各ステージ（ASR・翻訳・TTS）の処理時間をリアルタイムで計測し、GUI に表示します。チャンク蓄積時間を含む合計遅延も記録されます。
+
+### チャンク長動的調整
+GUI スライダーで音声チャンク長（1.5〜6.0秒）をリアルタイムに変更可能。短いチャンクは低遅延、長いチャンクは高精度です。
+
 ## 動作環境
 
 ### 対応 OS
@@ -162,6 +177,8 @@ graph TD
 - インターネット接続（LLM、翻訳サービス利用時）
 
 ## 処理遅延の分解
+
+### チャットモード
 
 チャットモード（VAD + Whisper + Gemma 2-9B + TTS）での実測値：
 
@@ -181,12 +198,31 @@ TTS 合成 (0.2-0.5s per sentence)
 
 ダブルバッファリングにより、1文目の音声再生中に2文目を並列処理し、ユーザーの体感遅延を最小化しています。
 
+### 翻訳モード
+
+翻訳モードでの実測値（Whisper small, chunk=4.0s）:
+
+```
+音声チャンク蓄積 (4.0s) — 遅延の主因
+    ↓
+ASR 認識 (1.0-2.5s)
+    ↓
+翻訳 (0.3-0.5s)
+    ↓
+TTS 合成 (0.5-1.0s)
+───────────
+合計: 6.0-8.0s
+```
+
+チャンク長を 2.0s に短縮することで合計 4.0-6.0s まで削減可能。
+
 ## 技術スタック
 
 ### Python ライブラリ（主要）
 
 - **faster-whisper** — 高速音声認識
 - **moonshine** — 軽量音声認識（英語向け）
+- **qwen-asr** — Qwen3-ASR 多言語音声認識
 - **silero-vad** — 発話検出
 - **deep-translator** — テキスト翻訳
 - **requests / httpx** — HTTP クライアント
