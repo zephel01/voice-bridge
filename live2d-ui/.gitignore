@@ -1,0 +1,7 @@
+node_modules
+dist
+dist-electron
+*.log
+.DS_Store
+public/live2dcubismcore.min.js
+public/live2d/

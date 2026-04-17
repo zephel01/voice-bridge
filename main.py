@@ -47,6 +47,15 @@ from translation_logger import TranslationLogger
 from ai_chat import AiChat, load_dotenv
 from latency_tracker import LatencyTracker
 
+# Live2D ブリッジ（オプション）。websockets 未インストール環境でも動くよう遅延ロード。
+try:
+    from live2d_bridge import Live2DBridge, infer_emotion
+except Exception as _e:  # pragma: no cover
+    Live2DBridge = None  # type: ignore
+
+    def infer_emotion(text: str) -> tuple[str, float]:  # type: ignore
+        return ("neutral", 1.0)
+
 # .env から環境変数をロード
 load_dotenv()
 
@@ -74,6 +83,9 @@ class VoiceBridge:
         ai_api_key: str = None,
         ai_model: str = "gpt-4o-mini",
         use_vad: bool = False,
+        live2d_enabled: bool = False,
+        live2d_host: str = "127.0.0.1",
+        live2d_port: int = 8765,
     ):
         # TTS言語はデフォルトで翻訳言語と同じ
         if tts_language is None:
@@ -136,6 +148,22 @@ class VoiceBridge:
 
         self.player = AudioPlayer()
         self.logger = TranslationLogger(log_dir="logs")
+
+        # Live2D ブリッジ（オプション）。接続中クライアントがあれば
+        # TTS を pygame ではなく Live2D フロントへ転送する。
+        self.live2d = None
+        self.live2d_enabled = live2d_enabled
+        if live2d_enabled:
+            if Live2DBridge is None:
+                print("[VoiceBridge] Live2D ブリッジは websockets が未インストールのため無効")
+            else:
+                try:
+                    self.live2d = Live2DBridge(host=live2d_host, port=live2d_port)
+                    self.live2d.start()
+                    print(f"[VoiceBridge] Live2D ブリッジ: ws://{live2d_host}:{live2d_port}")
+                except Exception as e:
+                    print(f"[VoiceBridge] Live2D ブリッジ起動失敗: {e}")
+                    self.live2d = None
 
         # モード: "translate"（翻訳）or "chat"（AI会話）
         self.mode = mode
@@ -376,7 +404,7 @@ class VoiceBridge:
             t_tts = self.latency_tracker.stop("tts")
 
             if audio_path:
-                self.player.enqueue(audio_path)
+                self._dispatch_audio(audio_path, translated_text)
 
             # レイテンシ記録（チャンク蓄積時間を追加レイテンシとして加算）
             record = self.latency_tracker.record_cycle(
@@ -645,10 +673,59 @@ class VoiceBridge:
         try:
             audio_path = self.tts.synthesize(text)
             if audio_path:
-                self.player.enqueue(audio_path)
+                self._dispatch_audio(audio_path, text)
                 print(f"  [TTS #{index}] \"{text[:30]}{'...' if len(text) > 30 else ''}\"")
         except Exception as e:
             print(f"  [TTS #{index}] エラー: {e}")
+
+    def _dispatch_audio(self, audio_path: str, text: str = "") -> None:
+        """TTS 音声ファイルの再生先を振り分ける。
+
+        - Live2D フロントが接続中: Live2D へ送信（pygame 再生はスキップ）
+          * フロント側が HTML5 Audio で再生 + AnalyserNode で口パク
+          * 再生中は `_on_play_start/_on_play_end` でキャプチャ抑制を維持
+        - 未接続・無効: 従来どおり pygame の再生キューに投入
+        """
+        if not audio_path:
+            return
+
+        # Live2D クライアント接続中ならそちらへ優先転送
+        if self.live2d is not None and self.live2d.has_client():
+            try:
+                emotion, intensity = infer_emotion(text or "")
+                pid = self.live2d.send_tts(
+                    audio_path,
+                    text=text or "",
+                    emotion=emotion,
+                    intensity=intensity,
+                )
+            except Exception as e:
+                print(f"[Live2D] 送信失敗、pygame にフォールバック: {e}")
+                pid = None
+
+            if pid:
+                # pygame 側と同じくキャプチャ抑制
+                self._on_play_start()
+
+                def _wait_end(pid_=pid, path_=audio_path):
+                    try:
+                        self.live2d.wait_playback_end(pid_, timeout=60.0)
+                    finally:
+                        self._on_play_end()
+                        try:
+                            os.remove(path_)
+                        except OSError:
+                            pass
+
+                threading.Thread(
+                    target=_wait_end,
+                    name="Live2DPlaybackWait",
+                    daemon=True,
+                ).start()
+                return
+
+        # フォールバック: 従来の pygame 再生
+        self.player.enqueue(audio_path)
 
     def _chat_ai_batch(self, user_text: str, t_start: float):
         """従来のバッチ応答（ストリーミングなし）"""
@@ -687,7 +764,7 @@ class VoiceBridge:
         t_tts = time.time() - t_step
 
         if audio_path:
-            self.player.enqueue(audio_path)
+            self._dispatch_audio(audio_path, ai_response)
 
         t_total = time.time() - t_start
         print(f"[====] 合計 {t_total:.1f}s (AI{t_ai:.1f}s + TTS{t_tts:.1f}s)")
@@ -767,7 +844,7 @@ class VoiceBridge:
             try:
                 audio_path = self.tts.synthesize(ai_response)
                 if audio_path:
-                    self.player.enqueue(audio_path)
+                    self._dispatch_audio(audio_path, ai_response)
             except Exception as e:
                 print(f"[Chat] TTS エラー: {e}")
 
@@ -798,6 +875,14 @@ class VoiceBridge:
         self.player.stop()
         self.tts.cleanup()
         self.logger.close()
+
+        # Live2D ブリッジ停止
+        if self.live2d is not None:
+            try:
+                self.live2d.stop()
+            except Exception as e:
+                print(f"[VoiceBridge] Live2D ブリッジ停止時エラー: {e}")
+            self.live2d = None
 
         if self._pipeline_thread:
             self._pipeline_thread.join(timeout=3.0)
@@ -966,6 +1051,9 @@ def run_cli(args):
         ai_base_url=args.ai_base_url,
         ai_model=args.ai_model,
         use_vad=args.vad,
+        live2d_enabled=args.live2d,
+        live2d_host=args.live2d_host,
+        live2d_port=args.live2d_port,
     )
 
     # Ctrl+C で停止
@@ -1099,6 +1187,9 @@ def run_gui(args):
             ai_base_url=args.ai_base_url,
             ai_model=settings.get("ai_model") or args.ai_model,
             use_vad=vad,
+            live2d_enabled=args.live2d,
+            live2d_host=args.live2d_host,
+            live2d_port=args.live2d_port,
         )
 
         # GUI コールバックを接続
@@ -1274,6 +1365,14 @@ def main():
                         help="AI API ベース URL (default: .env の AI_BASE_URL or OpenAI)")
     parser.add_argument("--ai-model", default=None,
                         help="AI モデル名 (default: .env の AI_MODEL or gpt-4o-mini)")
+
+    # Live2D 連携
+    parser.add_argument("--live2d", action="store_true",
+                        help="Live2D ブリッジ（WebSocket）を起動し、TTS をフロントへ転送")
+    parser.add_argument("--live2d-host", default="127.0.0.1",
+                        help="Live2D ブリッジ host (default: 127.0.0.1)")
+    parser.add_argument("--live2d-port", type=int, default=8765,
+                        help="Live2D ブリッジ port (default: 8765)")
 
     args = parser.parse_args()
 
