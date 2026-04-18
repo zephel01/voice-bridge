@@ -196,6 +196,11 @@ class VoiceBridge:
         # 競合を避ける。is_set()/set()/clear() はいずれもアトミック。
         self._playing_event = threading.Event()
 
+        # 言語自動検出の連続検出履歴（_auto_switch_source_language で使用）
+        # 複数のパイプラインスレッドから書き込まれる可能性があるためロックで保護する。
+        self._auto_lang_history: list[str] = []
+        self._auto_lang_lock = threading.Lock()
+
         # ストリーミング ASR（Moonshine + VAD 時に有効）
         self._streaming_asr = None
         self._streaming_lines = None  # queue.Queue for thread-safe line collection
@@ -1015,17 +1020,17 @@ class VoiceBridge:
         if prob is not None and prob < AUTO_LANG_MIN_PROB:
             return
 
-        # 2. 安定性フィルタ: 連続検出カウント
-        if not hasattr(self, "_auto_lang_history"):
-            self._auto_lang_history = []
-        self._auto_lang_history.append(detected_lang)
-        # 直近 N 件だけ保持
-        max_keep = AUTO_LANG_SWITCH_COUNT + 1
-        if len(self._auto_lang_history) > max_keep:
-            self._auto_lang_history = self._auto_lang_history[-max_keep:]
+        # 2. 安定性フィルタ: 連続検出カウント（履歴アクセスは排他保護）
+        with self._auto_lang_lock:
+            self._auto_lang_history.append(detected_lang)
+            # 直近 N 件だけ保持
+            max_keep = AUTO_LANG_SWITCH_COUNT + 1
+            if len(self._auto_lang_history) > max_keep:
+                self._auto_lang_history = self._auto_lang_history[-max_keep:]
+            # 判定はロック内でスナップショットを取り、ロック外で読む
+            recent = list(self._auto_lang_history[-AUTO_LANG_SWITCH_COUNT:])
 
         # 直近 N 件が全て同じ言語か判定
-        recent = self._auto_lang_history[-AUTO_LANG_SWITCH_COUNT:]
         if len(recent) < AUTO_LANG_SWITCH_COUNT or len(set(recent)) != 1:
             # まだ安定していない — GUI の確信度表示だけ更新
             if self.on_language_detected:
