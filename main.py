@@ -894,12 +894,56 @@ class VoiceBridge:
         print("[VoiceBridge] パイプライン開始")
 
     def stop(self):
-        """翻訳パイプラインを停止"""
+        """翻訳パイプラインを停止
+
+        停止順序を以下に統一して、パイプラインスレッドが消費中のリソース
+        （player / tts）を先に破棄してしまう不具合を防ぐ:
+
+          1. _running=False でループに終了シグナル
+          2. capture.stop() — 上流の生産者を止める
+          3. _streaming_asr.stop() — 中間コンポーネントを止める
+          4. pipeline_thread.join() — スレッドがリソースを手放すのを待つ
+          5. player / tts / logger / live2d を破棄
+        """
         self._running = False
-        self.capture.stop()
-        self.player.stop()
-        self.tts.cleanup()
-        self.logger.close()
+
+        # 1) 上流の生産者を止める
+        try:
+            self.capture.stop()
+        except Exception as e:
+            print(f"[VoiceBridge] capture.stop エラー: {e}")
+
+        # 2) ストリーミング ASR を止める（_chat_pipeline_loop の finally で
+        #    先に止まっていれば二度目の stop() は no-op）
+        if self._streaming_asr is not None:
+            try:
+                self._streaming_asr.stop()
+            except Exception as e:
+                print(f"[VoiceBridge] streaming_asr.stop エラー: {e}")
+
+        # 3) パイプラインスレッド終了待ち（リソースを手放してから破棄するため）
+        if self._pipeline_thread:
+            self._pipeline_thread.join(timeout=5.0)
+            if self._pipeline_thread.is_alive():
+                print(
+                    "[VoiceBridge] ⚠ パイプラインスレッドが 5 秒で終了しませんでした。"
+                    "daemon=True のためプロセス終了時に強制停止されます"
+                )
+            self._pipeline_thread = None
+
+        # 4) 下流の消費者・補助リソースを破棄
+        try:
+            self.player.stop()
+        except Exception as e:
+            print(f"[VoiceBridge] player.stop エラー: {e}")
+        try:
+            self.tts.cleanup()
+        except Exception as e:
+            print(f"[VoiceBridge] tts.cleanup エラー: {e}")
+        try:
+            self.logger.close()
+        except Exception as e:
+            print(f"[VoiceBridge] logger.close エラー: {e}")
 
         # Live2D ブリッジ停止
         if self.live2d is not None:
@@ -908,10 +952,6 @@ class VoiceBridge:
             except Exception as e:
                 print(f"[VoiceBridge] Live2D ブリッジ停止時エラー: {e}")
             self.live2d = None
-
-        if self._pipeline_thread:
-            self._pipeline_thread.join(timeout=3.0)
-            self._pipeline_thread = None
 
         print("[VoiceBridge] パイプライン停止")
 
