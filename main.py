@@ -1016,6 +1016,11 @@ class VoiceBridge:
         if detected_lang not in supported:
             return
 
+        # chat モード（translator=None）では翻訳ペアを持たないため、
+        # 言語自動切替の意味が無い。呼ばれても何もせず戻る。
+        if self.translator is None:
+            return
+
         # 1. 確信度フィルタ: 閾値未満は無視（GUI 通知も控える）
         if prob is not None and prob < AUTO_LANG_MIN_PROB:
             return
@@ -1076,9 +1081,10 @@ class VoiceBridge:
             print(f"[VoiceBridge] 言語ペアを auto→{target} に変更（検出時に自動切替）")
             return True
 
-        # Translator の言語ペア変更
-        if not self.translator.set_language_pair(source, target):
-            return False
+        # Translator の言語ペア変更（chat モードでは translator=None）
+        if self.translator is not None:
+            if not self.translator.set_language_pair(source, target):
+                return False
 
         # TTS の言語変更（ターゲット言語に合わせる）
         # VOICEVOX 使用中でターゲットが日本語以外 → Edge TTS に切り替え
