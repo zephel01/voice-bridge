@@ -305,7 +305,13 @@ class VoiceBridge:
     def _translate_pipeline_loop(self):
         """翻訳パイプラインループ"""
         self._notify_status("モデルロード中...")
-        self.transcriber.load_model()
+        try:
+            self.transcriber.load_model()
+        except RuntimeError as e:
+            print(f"[Pipeline] ASR 初期化失敗につき翻訳パイプラインを開始できません: {e}")
+            self._notify_status(f"ASR 起動失敗: {e}")
+            self._running = False
+            return
         self._notify_status("キャプチャ中...")
 
         while self._running:
@@ -423,22 +429,38 @@ class VoiceBridge:
         self._notify_status("モデルロード中...")
 
         # ストリーミング ASR がある場合はそちらをロード & 開始
-        if self._streaming_asr:
-            self._streaming_asr.load_model()
-            self._streaming_asr.start()
-            print("[1/4] ストリーミング ASR ロード完了 ✓")
-        else:
-            self.transcriber.load_model()
-            print("[1/4] モデルロード完了 ✓")
+        try:
+            if self._streaming_asr:
+                self._streaming_asr.load_model()
+                self._streaming_asr.start()
+                print("[1/4] ストリーミング ASR ロード完了 ✓")
+            else:
+                self.transcriber.load_model()
+                print("[1/4] モデルロード完了 ✓")
+        except RuntimeError as e:
+            print(f"[1/4] ASR 初期化失敗につきチャットパイプラインを開始できません: {e}")
+            self._notify_status(f"ASR 起動失敗: {e}")
+            self._running = False
+            # ストリーミング ASR が部分的にロードできている場合に備えて停止しておく
+            if self._streaming_asr:
+                try:
+                    self._streaming_asr.stop()
+                except Exception:
+                    pass
+            return
 
-        if self.use_vad:
-            self._chat_pipeline_vad()
-        else:
-            self._chat_pipeline_legacy()
-
-        # クリーンアップ
-        if self._streaming_asr:
-            self._streaming_asr.stop()
+        try:
+            if self.use_vad:
+                self._chat_pipeline_vad()
+            else:
+                self._chat_pipeline_legacy()
+        finally:
+            # クリーンアップ（例外が出ても必ずストリーミング ASR を停止）
+            if self._streaming_asr:
+                try:
+                    self._streaming_asr.stop()
+                except Exception as e:
+                    print(f"[1/4] ストリーミング ASR 停止エラー: {e}")
 
     def _chat_pipeline_vad(self):
         """VAD ベースのチャットパイプライン

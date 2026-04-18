@@ -65,15 +65,28 @@ class Transcriber:
         self._model = None
 
     def load_model(self):
-        """モデルをロード（初回のみ）"""
-        if self._model is None:
-            print(f"[Transcriber] モデルをロード中: {self.model_size} (device={self.device}, compute_type={self.compute_type})")
+        """モデルをロード（初回のみ）
+
+        失敗時は self._model を None のままにして RuntimeError を raise する。
+        呼び出し側はこれを捕捉して明示的にパイプラインを停止すること。
+        """
+        if self._model is not None:
+            return
+        print(f"[Transcriber] モデルをロード中: {self.model_size} (device={self.device}, compute_type={self.compute_type})")
+        try:
             self._model = WhisperModel(
                 self.model_size,
                 device=self.device,
                 compute_type=self.compute_type,
             )
             print(f"[Transcriber] モデルロード完了")
+        except Exception as e:
+            self._model = None
+            print(f"[Transcriber] モデルロード失敗: {e}")
+            raise RuntimeError(
+                f"Whisper モデルのロードに失敗しました (model={self.model_size}, "
+                f"device={self.device}): {e}"
+            ) from e
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> TranscribeResult:
         """

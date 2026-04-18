@@ -131,28 +131,38 @@ class Transcriber:
         return "cpu"
 
     def load_model(self):
-        """モデルをロード（初回のみ）"""
-        if self._model is None:
-            import torch
+        """モデルをロード（初回のみ）
 
-            dtype = self._get_torch_dtype()
-            device_map = self._get_device_map()
+        失敗時は self._model を None のままにして RuntimeError を raise。
+        呼び出し側はこれを捕捉して明示的にパイプラインを停止すること。
+        """
+        if self._model is not None:
+            return
 
-            print(
-                f"[Transcriber/Qwen3-ASR] モデルをロード中: {self._model_name} "
-                f"(device={device_map}, dtype={dtype})"
+        import torch
+
+        dtype = self._get_torch_dtype()
+        device_map = self._get_device_map()
+
+        print(
+            f"[Transcriber/Qwen3-ASR] モデルをロード中: {self._model_name} "
+            f"(device={device_map}, dtype={dtype})"
+        )
+        try:
+            self._model = Qwen3ASRModel.from_pretrained(
+                self._model_name,
+                dtype=dtype,
+                device_map=device_map,
+                max_new_tokens=256,
             )
-            try:
-                self._model = Qwen3ASRModel.from_pretrained(
-                    self._model_name,
-                    dtype=dtype,
-                    device_map=device_map,
-                    max_new_tokens=256,
-                )
-                print(f"[Transcriber/Qwen3-ASR] モデルロード完了")
-            except Exception as e:
-                print(f"[Transcriber/Qwen3-ASR] モデルロード失敗: {e}")
-                raise
+            print(f"[Transcriber/Qwen3-ASR] モデルロード完了")
+        except Exception as e:
+            self._model = None
+            print(f"[Transcriber/Qwen3-ASR] モデルロード失敗: {e}")
+            raise RuntimeError(
+                f"Qwen3-ASR モデルのロードに失敗しました "
+                f"(model={self._model_name}, device={device_map}): {e}"
+            ) from e
 
     # Qwen3-ASR の言語名 → voice-bridge の言語コード（逆引き）
     LANGUAGE_REVERSE_MAP = {

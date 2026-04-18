@@ -89,23 +89,33 @@ class Transcriber:
         self._model_arch = None
 
     def load_model(self):
-        """モデルをロード（初回のみ）"""
-        if self._transcriber is None:
-            print(
-                f"[Transcriber/Moonshine] モデルをロード中: language={self.language}"
+        """モデルをロード（初回のみ）
+
+        失敗時は self._transcriber を None のままにして RuntimeError を raise。
+        呼び出し側はこれを捕捉して明示的にパイプラインを停止すること。
+        """
+        if self._transcriber is not None:
+            return
+        print(
+            f"[Transcriber/Moonshine] モデルをロード中: language={self.language}"
+        )
+        try:
+            self._model_path, self._model_arch = (
+                moonshine_voice.get_model_for_language(self.language)
             )
-            try:
-                self._model_path, self._model_arch = (
-                    moonshine_voice.get_model_for_language(self.language)
-                )
-                self._transcriber = moonshine_voice.Transcriber(
-                    model_path=self._model_path,
-                    model_arch=self._model_arch,
-                )
-                print(f"[Transcriber/Moonshine] モデルロード完了")
-            except Exception as e:
-                print(f"[Transcriber/Moonshine] モデルロード失敗: {e}")
-                raise
+            self._transcriber = moonshine_voice.Transcriber(
+                model_path=self._model_path,
+                model_arch=self._model_arch,
+            )
+            print(f"[Transcriber/Moonshine] モデルロード完了")
+        except Exception as e:
+            self._transcriber = None
+            self._model_path = None
+            self._model_arch = None
+            print(f"[Transcriber/Moonshine] モデルロード失敗: {e}")
+            raise RuntimeError(
+                f"Moonshine モデルのロードに失敗しました (language={self.language}): {e}"
+            ) from e
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> TranscribeResult:
         """
@@ -316,11 +326,18 @@ class StreamingTranscriber:
         self._running = False
 
     def load_model(self):
-        """モデルをロード"""
-        if self._transcriber is None:
-            print(
-                f"[StreamingTranscriber] モデルをロード中: language={self.language}"
-            )
+        """モデルをロード
+
+        失敗時は self._transcriber / self._listener を None のままにして
+        RuntimeError を raise。呼び出し側はこれを捕捉して明示的に
+        パイプラインを停止すること。
+        """
+        if self._transcriber is not None:
+            return
+        print(
+            f"[StreamingTranscriber] モデルをロード中: language={self.language}"
+        )
+        try:
             model_path, model_arch = moonshine_voice.get_model_for_language(
                 self.language
             )
@@ -337,6 +354,14 @@ class StreamingTranscriber:
             )
             self._transcriber.add_listener(self._listener)
             print(f"[StreamingTranscriber] モデルロード完了")
+        except Exception as e:
+            self._transcriber = None
+            self._listener = None
+            print(f"[StreamingTranscriber] モデルロード失敗: {e}")
+            raise RuntimeError(
+                f"Moonshine ストリーミング ASR のロードに失敗しました "
+                f"(language={self.language}): {e}"
+            ) from e
 
     def start(self):
         """ストリーミング開始"""
