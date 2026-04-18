@@ -689,13 +689,8 @@ class VoiceBridge:
             if t_first_audio is None:
                 t_first_audio = time.time() - t_start
 
-        # 結果表示 & ログ
-        if full_response.strip():
-            print(f"  AI:  {full_response.strip()}")
-            if self.on_japanese_text:
-                self.on_japanese_text(full_response.strip())
-
-            self.logger.log("user", "ai", user_text, full_response.strip())
+        # 結果表示 & ログ（共通後処理に集約）
+        self._finalize_ai_response(user_text, full_response, log_prefix="  AI: ")
 
         t_total = time.time() - t_start
         first_str = f", 初回音声={t_first_audio:.2f}s" if t_first_audio else ""
@@ -704,6 +699,27 @@ class VoiceBridge:
 
         print("[====] マイク待機中... 話しかけてください")
         self._notify_status("マイク待機中...")
+
+    def _finalize_ai_response(
+        self, user_text: str, ai_text: str, *, log_prefix: str = "[AI]"
+    ) -> None:
+        """AI 応答の表示・GUI コールバック・翻訳ログ記録を一括で行う。
+
+        _chat_ai_streaming / _chat_ai_batch / chat_text の 4 箇所で重複
+        していた「print → on_japanese_text → logger.log」の 3 ステップを集約する。
+
+        Args:
+            user_text: ユーザー入力テキスト（ログ記録の user 側）
+            ai_text:   AI 応答テキスト（表示・コールバック・ログの ai 側）
+            log_prefix: print に付けるプレフィックス（呼び出し元のスタイルに合わせる）
+        """
+        ai_text = ai_text.strip() if ai_text else ""
+        if not ai_text:
+            return
+        print(f"{log_prefix} {ai_text}")
+        if self.on_japanese_text:
+            self.on_japanese_text(ai_text)
+        self.logger.log("user", "ai", user_text, ai_text)
 
     def _synthesize_and_enqueue(self, text: str, index: int):
         """テキストを TTS で音声合成し、再生キューに追加"""
@@ -782,12 +798,7 @@ class VoiceBridge:
             return
 
         print(f"[2/4] AI 応答完了 ({t_ai:.1f}s) ✓")
-        print(f"  AI:  {ai_response}")
-        if self.on_japanese_text:
-            self.on_japanese_text(ai_response)
-
-        # ログ保存
-        self.logger.log("user", "ai", user_text, ai_response)
+        self._finalize_ai_response(user_text, ai_response, log_prefix="  AI: ")
 
         # 音声合成
         print("[4/4] 音声合成中...")
@@ -849,11 +860,8 @@ class VoiceBridge:
                 except Exception as e:
                     print(f"[Chat] AI ストリーミングエラー: {e}")
 
-                if full_response.strip():
-                    print(f"[AI] {full_response.strip()}")
-                    if self.on_japanese_text:
-                        self.on_japanese_text(full_response.strip())
-                    self.logger.log("user", "ai", text, full_response.strip())
+                # 結果表示 & ログ（共通後処理に集約）
+                self._finalize_ai_response(text, full_response, log_prefix="[AI]")
 
                 self._notify_status("マイク待機中..." if self._running else "停止中")
                 return
@@ -869,12 +877,8 @@ class VoiceBridge:
             if not ai_response.strip():
                 return
 
-            print(f"[AI] {ai_response}")
-            if self.on_japanese_text:
-                self.on_japanese_text(ai_response)
-
-            # ログ保存
-            self.logger.log("user", "ai", text, ai_response)
+            # 結果表示 & ログ（共通後処理に集約）
+            self._finalize_ai_response(text, ai_response, log_prefix="[AI]")
 
             # 音声合成
             self._notify_status("音声合成中...")
