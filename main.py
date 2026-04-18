@@ -1122,10 +1122,11 @@ def run_cli(args):
     )
 
     # Ctrl+C で停止
+    # シグナルハンドラでは重い処理をせず、KeyboardInterrupt を上げて
+    # メインスレッドの except 側でクリーンアップする（bridge.stop() は
+    # join を伴い 5 秒かかる可能性があるためシグナル文脈では走らせない）。
     def signal_handler(sig, frame):
-        print("\n[CLI] 停止中...")
-        bridge.stop()
-        sys.exit(0)
+        raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, signal_handler)
 
