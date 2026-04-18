@@ -46,6 +46,16 @@ from player import AudioPlayer
 from translation_logger import TranslationLogger
 from ai_chat import AiChat, load_dotenv
 from latency_tracker import LatencyTracker
+from config.constants import (
+    AUDIO_CAPTURE_TIMEOUT,
+    TTS_END_BUFFER_DELAY,
+    AUTO_LANG_MIN_PROB,
+    AUTO_LANG_SWITCH_COUNT,
+    SILENCE_THRESHOLD,
+    LIVE2D_PLAYBACK_TIMEOUT,
+    PIPELINE_THREAD_JOIN_TIMEOUT,
+    CLI_MAIN_LOOP_SLEEP,
+)
 
 # Live2D ブリッジ（オプション）。websockets 未インストール環境でも動くよう遅延ロード。
 try:
@@ -224,8 +234,8 @@ class VoiceBridge:
     def _on_play_end(self):
         """TTS 再生終了時 — キャプチャを再開（少し待ってバッファに残るTTS音声を捨てる）"""
         # 再生終了直後のバッファにTTS音声の残りが入っている可能性があるので少し待つ
-        # 0.5秒: BlackHole等のループバックデバイスのバッファ遅延を考慮
-        time.sleep(0.5)
+        # BlackHole 等のループバックデバイスのバッファ遅延を考慮
+        time.sleep(TTS_END_BUFFER_DELAY)
         # バッファに溜まったチャンクを捨てる
         while not self.capture.audio_queue.empty():
             try:
@@ -319,7 +329,7 @@ class VoiceBridge:
 
         while self._running:
             # 1. 音声チャンクを取得
-            audio_chunk = self.capture.get_chunk(timeout=1.0)
+            audio_chunk = self.capture.get_chunk(timeout=AUDIO_CAPTURE_TIMEOUT)
             if audio_chunk is None:
                 continue
 
@@ -356,7 +366,7 @@ class VoiceBridge:
 
             # active_source: 確信度が閾値以上の検出言語、または Translator の現在のソース言語
             if self.source_language == "auto":
-                if detected_lang and detected_prob is not None and detected_prob >= self.AUTO_LANG_MIN_PROB:
+                if detected_lang and detected_prob is not None and detected_prob >= AUTO_LANG_MIN_PROB:
                     active_source = detected_lang
                 else:
                     # 確信度が低い → Translator の現在のソース言語を使う
@@ -488,7 +498,7 @@ class VoiceBridge:
 
         while self._running:
             # VAD が発話を検出してキューに入れるのを待つ
-            audio_chunk = self.capture.get_chunk(timeout=1.0)
+            audio_chunk = self.capture.get_chunk(timeout=AUDIO_CAPTURE_TIMEOUT)
             if audio_chunk is None:
                 continue
 
@@ -556,11 +566,10 @@ class VoiceBridge:
         # 発話バッファ: 無音が続くまでテキストを溜める
         utterance_buffer = []
         silence_count = 0
-        SILENCE_THRESHOLD = 2  # 無音チャンクが連続N回で発話終了と判定
 
         while self._running:
             # 1. 音声チャンクを取得
-            audio_chunk = self.capture.get_chunk(timeout=1.0)
+            audio_chunk = self.capture.get_chunk(timeout=AUDIO_CAPTURE_TIMEOUT)
             if audio_chunk is None:
                 # タイムアウト = 無音扱い
                 if utterance_buffer:
@@ -734,7 +743,7 @@ class VoiceBridge:
 
                 def _wait_end(pid_=pid, path_=audio_path):
                     try:
-                        self.live2d.wait_playback_end(pid_, timeout=60.0)
+                        self.live2d.wait_playback_end(pid_, timeout=LIVE2D_PLAYBACK_TIMEOUT)
                     finally:
                         self._on_play_end()
                         try:
@@ -923,7 +932,7 @@ class VoiceBridge:
 
         # 3) パイプラインスレッド終了待ち（リソースを手放してから破棄するため）
         if self._pipeline_thread:
-            self._pipeline_thread.join(timeout=5.0)
+            self._pipeline_thread.join(timeout=PIPELINE_THREAD_JOIN_TIMEOUT)
             if self._pipeline_thread.is_alive():
                 print(
                     "[VoiceBridge] ⚠ パイプラインスレッドが 5 秒で終了しませんでした。"
@@ -990,10 +999,6 @@ class VoiceBridge:
         else:
             self.tts.set_voice(voice_key)
 
-    # --- 言語自動検出の安定化パラメータ ---
-    AUTO_LANG_MIN_PROB = 0.75        # この確信度未満の検出は無視
-    AUTO_LANG_SWITCH_COUNT = 2       # 同じ言語がこの回数連続で検出されたら切替
-
     def _auto_switch_source_language(self, detected_lang: str, prob: float = None):
         """自動検出されたソース言語に基づいて翻訳ペアを動的に切替
 
@@ -1007,7 +1012,7 @@ class VoiceBridge:
             return
 
         # 1. 確信度フィルタ: 閾値未満は無視（GUI 通知も控える）
-        if prob is not None and prob < self.AUTO_LANG_MIN_PROB:
+        if prob is not None and prob < AUTO_LANG_MIN_PROB:
             return
 
         # 2. 安定性フィルタ: 連続検出カウント
@@ -1015,13 +1020,13 @@ class VoiceBridge:
             self._auto_lang_history = []
         self._auto_lang_history.append(detected_lang)
         # 直近 N 件だけ保持
-        max_keep = self.AUTO_LANG_SWITCH_COUNT + 1
+        max_keep = AUTO_LANG_SWITCH_COUNT + 1
         if len(self._auto_lang_history) > max_keep:
             self._auto_lang_history = self._auto_lang_history[-max_keep:]
 
         # 直近 N 件が全て同じ言語か判定
-        recent = self._auto_lang_history[-self.AUTO_LANG_SWITCH_COUNT:]
-        if len(recent) < self.AUTO_LANG_SWITCH_COUNT or len(set(recent)) != 1:
+        recent = self._auto_lang_history[-AUTO_LANG_SWITCH_COUNT:]
+        if len(recent) < AUTO_LANG_SWITCH_COUNT or len(set(recent)) != 1:
             # まだ安定していない — GUI の確信度表示だけ更新
             if self.on_language_detected:
                 self.on_language_detected(detected_lang, prob)
@@ -1044,7 +1049,7 @@ class VoiceBridge:
             return
 
         prob_str = f" ({prob:.0%})" if prob is not None else ""
-        print(f"[AutoLang] 言語確定: {stable_lang}{prob_str} ({self.AUTO_LANG_SWITCH_COUNT}回連続) → 翻訳ペアを {stable_lang}→{self.target_language} に切替")
+        print(f"[AutoLang] 言語確定: {stable_lang}{prob_str} ({AUTO_LANG_SWITCH_COUNT}回連続) → 翻訳ペアを {stable_lang}→{self.target_language} に切替")
 
         # Translator のソース言語のみ更新（ターゲットはそのまま）
         try:
@@ -1183,7 +1188,7 @@ def run_cli(args):
                     break
         else:
             while True:
-                time.sleep(0.5)
+                time.sleep(CLI_MAIN_LOOP_SLEEP)
     except KeyboardInterrupt:
         bridge.stop()
 
