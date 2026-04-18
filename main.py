@@ -181,7 +181,10 @@ class VoiceBridge:
 
         self._running = False
         self._pipeline_thread = None
-        self._is_playing = False  # TTS再生中フラグ（フィードバックループ防止）
+        # TTS再生中フラグ（フィードバックループ防止）
+        # threading.Event にすることで再生スレッドとパイプラインスレッド間の
+        # 競合を避ける。is_set()/set()/clear() はいずれもアトミック。
+        self._playing_event = threading.Event()
 
         # ストリーミング ASR（Moonshine + VAD 時に有効）
         self._streaming_asr = None
@@ -215,7 +218,7 @@ class VoiceBridge:
 
     def _on_play_start(self):
         """TTS 再生開始時 — キャプチャを抑制"""
-        self._is_playing = True
+        self._playing_event.set()
         print("[VoiceBridge] TTS再生開始 → キャプチャ抑制")
 
     def _on_play_end(self):
@@ -229,7 +232,7 @@ class VoiceBridge:
                 self.capture.audio_queue.get_nowait()
             except Exception:
                 break
-        self._is_playing = False
+        self._playing_event.clear()
         print("[VoiceBridge] TTS再生終了 → キャプチャ再開")
 
     def _setup_streaming_asr(self):
@@ -264,7 +267,7 @@ class VoiceBridge:
 
         # AudioCapture の生オーディオをストリーミング ASR に接続
         def on_audio(audio_data):
-            if self._streaming_asr and not self._is_playing:
+            if self._streaming_asr and not self._playing_event.is_set():
                 self._streaming_asr.add_audio(audio_data, self.capture.sample_rate)
 
         self.capture.on_audio = on_audio
@@ -321,7 +324,7 @@ class VoiceBridge:
                 continue
 
             # TTS 再生中はキャプチャしたチャンクを捨てる（フィードバックループ防止）
-            if self._is_playing:
+            if self._playing_event.is_set():
                 print("[Pipeline] TTS再生中のため音声チャンクをスキップ")
                 continue
 
@@ -490,7 +493,7 @@ class VoiceBridge:
                 continue
 
             # TTS 再生中はスキップ（フィードバックループ防止）
-            if self._is_playing:
+            if self._playing_event.is_set():
                 # ストリーミング ASR のバッファもクリア
                 if use_streaming:
                     self._collect_streaming_text()
@@ -570,7 +573,7 @@ class VoiceBridge:
                 continue
 
             # TTS 再生中はスキップ（フィードバックループ防止）
-            if self._is_playing:
+            if self._playing_event.is_set():
                 continue
 
             # 2. 音声認識（テキスト化）
