@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/Live2DAvatar.ts","./src/ModelSelector.tsx","./src/emotionMap.ts","./src/live2d-setup.ts","./src/main.tsx","./src/useBridgeSocket.ts","./src/vite-env.d.ts"],"errors":true,"version":"5.9.3"}

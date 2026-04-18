@@ -6,14 +6,32 @@ import {
   type BridgeMessage,
   type TtsMessage,
 } from "./useBridgeSocket";
+import { ModelSelector, type ModelEntry } from "./ModelSelector";
 
 // デフォルトのモデル URL。Vite のビルド時に /public 配下が / にマウントされるため、
 // public/live2d/<model_name>/.../*.model3.json に配置する想定。
-// 公式サンプル Haru Greeter (haru_greeter_t05) を既定にする。
 const DEFAULT_MODEL_URL = "/live2d/haru/runtime/haru_greeter_t05.model3.json";
+const STORAGE_KEY = "live2d_selected_model";
 
 // Python ブリッジの待受アドレス
 const BRIDGE_URL = "ws://127.0.0.1:8765";
+
+/** 現在のモデル URL を解決する（URLクエリ > localStorage > デフォルト） */
+function resolveModelUrl(): string {
+  const fromQuery = new URLSearchParams(window.location.search).get("model");
+  if (fromQuery) return fromQuery;
+  const fromStorage = localStorage.getItem(STORAGE_KEY);
+  if (fromStorage) return fromStorage;
+  return DEFAULT_MODEL_URL;
+}
+
+/** モデルを切り替える（localStorage 保存 + URL を書き換えてリロード） */
+function switchModel(model: ModelEntry): void {
+  localStorage.setItem(STORAGE_KEY, model.path);
+  const url = new URL(window.location.href);
+  url.searchParams.set("model", model.path);
+  window.location.href = url.toString();
+}
 
 function base64ToBlobUrl(b64: string, mime: string): string {
   const binStr = atob(b64);
@@ -32,6 +50,9 @@ export default function App() {
   const [emotion, setEmotion] = useState<Emotion>("neutral");
   const [modelReady, setModelReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // 解決済みモデル URL（セレクター表示用に保持）
+  const [currentModelUrl] = useState<string>(resolveModelUrl);
 
   // TTS キュー: フロントで順次再生
   const ttsQueueRef = useRef<TtsMessage[]>([]);
@@ -96,10 +117,6 @@ export default function App() {
   useEffect(() => {
     if (!canvasRef.current) return;
 
-    const modelUrl =
-      new URLSearchParams(window.location.search).get("model") ||
-      DEFAULT_MODEL_URL;
-
     // Cubism Core が読み込まれているかの事前チェック
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (!(window as any).Live2DCubismCore) {
@@ -113,7 +130,7 @@ export default function App() {
     try {
       avatar = new Live2DAvatar({
         canvas: canvasRef.current,
-        modelUrl,
+        modelUrl: currentModelUrl,
         scale: 0.28,
         lipSyncGain: 1.6,
         backgroundAlpha: 0,
@@ -136,7 +153,7 @@ export default function App() {
       avatar?.destroy();
       avatarRef.current = null;
     };
-  }, []);
+  }, [currentModelUrl]);
 
   // 接続直後に Neutral に揃えておく
   useEffect(() => {
@@ -164,6 +181,10 @@ export default function App() {
         <div className="emotion-badge">
           {emotion} {modelReady ? "" : "(loading)"}
         </div>
+        <ModelSelector
+          currentModelPath={currentModelUrl}
+          onSelect={switchModel}
+        />
         {subtitle && <div className="subtitle">{subtitle}</div>}
         {loadError && (
           <div className="subtitle" style={{ color: "#ff9090" }}>

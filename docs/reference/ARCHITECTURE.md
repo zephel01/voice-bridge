@@ -57,6 +57,10 @@ graph TD
     Ollama ==> TTSChat
     TTSChat ==> Play2["再生<br/>スピーカー<br/>ダブルバッファリング"]
 
+    %% Live2D UI（翻訳・チャット共通オプション）
+    TTSTrans -->|"WebSocket<br/>ws://127.0.0.1:8765"| Live2D["Live2D UI<br/>(Electron + React)<br/>アバター表示・リップシンク<br/>--live2d オプションで有効化"]
+    TTSChat  -->|"WebSocket<br/>ws://127.0.0.1:8765"| Live2D
+
     %% Final output
     Play1 ==> AudioOut
     Play2 ==> AudioOut
@@ -82,13 +86,15 @@ graph TD
 
 ```
 音声キャプチャ → ASR認識 → Google翻訳 → TTS音声合成 → 再生
+                                                    ↓（--live2d 時）
+                                              Live2D UI へ転送
 ```
 
 1. **音声キャプチャ** — システム音声またはマイク入力を録音
 2. **ASR認識** — Faster-Whisper、Moonshine、または Qwen3-ASR で音声をテキスト化（自動言語検出対応）
 3. **Google翻訳** — deep-translator を使用して翻訳
 4. **TTS音声合成** — CoeiroInk / VOICEVOX / Edge TTS で読み上げ
-5. **再生** — スピーカーから出力
+5. **再生** — スピーカーから出力。`--live2d` 有効時は Live2D UI（WebSocket）へ優先転送しアバターが発話・リップシンク
 
 ### チャットモード（Ollama を利用）
 
@@ -99,7 +105,11 @@ graph TD
                           ↓                ↓
                     1文目を再生しながら   2文目を合成
                     （ダブルバッファリング）
+                          ↓（--live2d 時）
+                     Live2D UI へ転送
 ```
+
+`--live2d` 有効時は TTS 再生が Live2D UI（WebSocket）へ優先転送され、アバターが発話・リップシンクします。
 
 チャットモードでは以下の最適化により低遅延を実現しています。
 
@@ -146,7 +156,9 @@ graph TD
 
 | コンポーネント | 説明 |
 |---|---|
-| tkinter | GUI フレームワーク |
+| tkinter | メイン GUI フレームワーク（設定・制御パネル） |
+| Electron + React | Live2D アバター UI（翻訳・チャット両モードで利用可能、`--live2d` オプションで有効化） |
+| pixi-live2d-display | Live2D モデルの WebGL レンダリング |
 
 ## 新機能（v4）
 

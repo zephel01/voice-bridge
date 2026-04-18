@@ -96,3 +96,112 @@ body,
   background: rgba(120, 90, 220, 0.35);
   border: 1px solid rgba(170, 140, 255, 0.45);
 }
+
+/* ---- Model Selector ---- */
+.model-selector {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.model-selector__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #c8c8e0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(180, 160, 255, 0.25);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  outline: none;
+}
+
+.model-selector__toggle:hover,
+.model-selector__toggle--open {
+  background: rgba(100, 70, 200, 0.35);
+  border-color: rgba(180, 140, 255, 0.5);
+  color: #e8e8ff;
+}
+
+.model-selector__chevron {
+  transition: transform 0.2s;
+}
+
+.model-selector__toggle--open .model-selector__chevron {
+  transform: rotate(180deg);
+}
+
+.model-selector__panel {
+  margin-bottom: 8px;
+  padding: 6px;
+  min-width: 130px;
+  background: rgba(15, 12, 30, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(180, 140, 255, 0.3);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  order: -1; /* ボタンより上に表示 */
+}
+
+.model-selector__label {
+  font-size: 10px;
+  color: rgba(180, 160, 220, 0.6);
+  padding: 2px 8px 4px;
+  letter-spacing: 0.04em;
+}
+
+.model-selector__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: #d0cce8;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+  outline: none;
+}
+
+.model-selector__item:hover {
+  background: rgba(120, 90, 220, 0.3);
+  color: #f0eeff;
+}
+
+.model-selector__item--active {
+  background: rgba(120, 90, 220, 0.2);
+  color: #c8b8ff;
+}
+
+.model-selector__item-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(180, 140, 255, 0.35);
+  flex-shrink: 0;
+}
+
+.model-selector__item--active .model-selector__item-dot {
+  background: #a080ff;
+  box-shadow: 0 0 6px #a080ff88;
+}
+
+.model-selector__item-check {
+  margin-left: auto;
+  font-size: 11px;
+  color: #a080ff;
+}
