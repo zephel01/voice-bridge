@@ -43,6 +43,7 @@ from translator import Translator
 from tts_engine import TTSEngine
 from tts_voicevox import VoicevoxTTS
 from tts_coeiroink import CoeiroinkTTS
+from tts_base import create_tts, TTSBackend
 from player import AudioPlayer
 from translation_logger import TranslationLogger
 from ai_chat import AiChat, load_dotenv
@@ -140,23 +141,18 @@ class VoiceBridge:
         else:
             self.translator = None
 
-        # TTS エンジン選択: CoeiroInk > VOICEVOX > Edge TTS
+        # TTS エンジン選択: CoeiroInk > VOICEVOX > Edge TTS（ファクトリに集約）
         self.use_voicevox = use_voicevox
         self._voicevox_speaker_id = voicevox_speaker_id
 
-        if use_coeiroink and tts_language == "ja":
-            self.tts = CoeiroinkTTS(speaker_id=coeiroink_speaker_id)
-            print(f"[VoiceBridge] TTS: CoeiroInk (speaker_id={coeiroink_speaker_id})")
-        elif use_voicevox and tts_language == "ja":
-            self.tts = VoicevoxTTS(speaker_id=voicevox_speaker_id)
-            print(f"[VoiceBridge] TTS: VOICEVOX (speaker_id={voicevox_speaker_id})")
-        else:
-            if use_coeiroink and tts_language != "ja":
-                print(f"[VoiceBridge] CoeiroInk は日本語のみ対応のため、Edge TTS にフォールバック")
-            elif use_voicevox and tts_language != "ja":
-                print(f"[VoiceBridge] VOICEVOX は日本語のみ対応のため、Edge TTS にフォールバック")
-            self.tts = TTSEngine(language=tts_language, voice=voice)
-            print(f"[VoiceBridge] TTS: Edge TTS (language={tts_language})")
+        self.tts: TTSBackend = create_tts(
+            tts_language=tts_language,
+            voice=voice,
+            use_voicevox=use_voicevox,
+            voicevox_speaker_id=voicevox_speaker_id,
+            use_coeiroink=use_coeiroink,
+            coeiroink_speaker_id=coeiroink_speaker_id,
+        )
 
         self.player = AudioPlayer()
         self.logger = TranslationLogger(log_dir="logs")
