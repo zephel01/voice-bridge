@@ -36,8 +36,9 @@ else:
     DEFAULT_DEVICE = "BlackHole 2ch"
 
 # ASR エンジンは --asr オプションで選択（デフォルト: whisper）
-# main() の argparse で切り替え、VoiceBridge に注入する
-from transcriber import Transcriber as WhisperTranscriber
+# 3 実装（whisper / moonshine / qwen3）の切替は transcriber_base の
+# ファクトリに集約済み。呼び出し側は create_transcriber(engine, ...) で取得する。
+from transcriber_base import create_transcriber, TranscriberProtocol
 from translator import Translator
 from tts_engine import TTSEngine
 from tts_voicevox import VoicevoxTTS
@@ -118,18 +119,19 @@ class VoiceBridge:
         if enable_vad:
             print(f"[VoiceBridge] VAD: Silero VAD（発話単位検出）")
 
-        # ASR エンジンの選択
-        if asr_engine == "moonshine":
-            from transcriber_moonshine import Transcriber as MoonshineTranscriber
-            self.transcriber = MoonshineTranscriber(model_size=model_size, language=source_language)
-            print(f"[VoiceBridge] ASR: Moonshine (language={source_language})")
-        elif asr_engine == "qwen3":
-            from transcriber_qwen3 import Transcriber as Qwen3Transcriber
-            self.transcriber = Qwen3Transcriber(model_size=model_size, language=source_language, device=asr_device)
-            print(f"[VoiceBridge] ASR: Qwen3-ASR (model={model_size}, language={source_language})")
-        else:
-            self.transcriber = WhisperTranscriber(model_size=model_size, language=source_language)
-            print(f"[VoiceBridge] ASR: faster-whisper (model={model_size}, language={source_language})")
+        # ASR エンジンの選択（ファクトリに集約）
+        self.transcriber: TranscriberProtocol = create_transcriber(
+            asr_engine,
+            model_size=model_size,
+            language=source_language,
+            device=asr_device,
+        )
+        # ログメッセージ: エンジン名だけファクトリの外側で出す
+        _asr_label = {
+            "moonshine": f"Moonshine (language={source_language})",
+            "qwen3": f"Qwen3-ASR (model={model_size}, language={source_language})",
+        }.get(asr_engine, f"faster-whisper (model={model_size}, language={source_language})")
+        print(f"[VoiceBridge] ASR: {_asr_label}")
         # チャットモードでは翻訳不要
         if mode != "chat":
             # auto モードでは検出前のデフォルトとして en→target で初期化
