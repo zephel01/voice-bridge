@@ -221,6 +221,28 @@ class VoiceBridgeGUI:
                   font=("Helvetica", 10), foreground="#a6adc8").grid(
             row=5, column=3, columnspan=2, sticky=tk.W, padx=(5, 0), pady=(8, 0))
 
+        # 入力ゲイン調整（7行目に配置）
+        ttk.Label(settings_frame, text="入力ゲイン:").grid(row=6, column=0, sticky=tk.W, padx=(0, 8), pady=(8, 0))
+        self._input_gain_var = tk.DoubleVar(value=1.0)
+        self._gain_slider = tk.Scale(
+            settings_frame,
+            variable=self._input_gain_var,
+            from_=1.0, to=10.0, resolution=0.5,
+            orient=tk.HORIZONTAL, length=200,
+            bg="#1e1e2e", fg="#cdd6f4", troughcolor="#313244",
+            highlightthickness=0, font=("Helvetica", 10),
+            command=self._on_gain_changed,
+        )
+        self._gain_slider.grid(row=6, column=1, columnspan=2, sticky=tk.W, pady=(8, 0))
+        self._gain_label_var = tk.StringVar(value="1.0x（標準）")
+        ttk.Label(settings_frame, textvariable=self._gain_label_var,
+                  font=("Helvetica", 10), foreground="#a6adc8").grid(
+            row=6, column=3, sticky=tk.W, padx=(5, 0), pady=(8, 0))
+        self._auto_gain_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            settings_frame, text="自動", variable=self._auto_gain_var,
+        ).grid(row=6, column=4, sticky=tk.W, padx=(4, 0), pady=(8, 0))
+
         # --- ボタンエリア ---
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill=tk.X, pady=(0, 10))
@@ -444,6 +466,19 @@ class VoiceBridgeGUI:
         if self.on_chunk_duration_change:
             self.on_chunk_duration_change(duration)
 
+    def _on_gain_changed(self, value=None):
+        """入力ゲインスライダー変更イベント"""
+        gain = self._input_gain_var.get()
+        if gain <= 1.0:
+            hint = "（標準）"
+        elif gain <= 3.0:
+            hint = "（やや増幅）"
+        elif gain <= 6.0:
+            hint = "（増幅）"
+        else:
+            hint = "（強い増幅）"
+        self._gain_label_var.set(f"{gain:.1f}x{hint}")
+
     def _on_chat_submit(self, event=None):
         """チャットテキスト送信"""
         text = self._chat_entry.get().strip()
@@ -474,6 +509,8 @@ class VoiceBridgeGUI:
             "target_lang": target_lang,
             "ai_model": self.ai_model_var.get(),
             "chunk_duration": self._chunk_duration_var.get(),
+            "input_gain": self._input_gain_var.get(),
+            "auto_gain": self._auto_gain_var.get(),
         }
 
     def _on_close(self):

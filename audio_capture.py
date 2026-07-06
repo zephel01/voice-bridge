@@ -28,6 +28,10 @@ class AudioCapture:
         sample_rate: int = 16000,
         chunk_duration: float = 4.0,
         silence_threshold: float = 0.03,
+        # --- ゲイン設定 ---
+        input_gain: float = 1.0,        # 入力ゲイン倍率（1.0 = 変更なし）
+        auto_gain: bool = False,         # オートゲイン（自動音量正規化）
+        auto_gain_target: float = 0.08,  # オートゲインのターゲット RMS
         # --- VAD 設定 ---
         use_vad: bool = False,
         vad_threshold: float = 0.5,
@@ -48,6 +52,22 @@ class AudioCapture:
         self._thread = None
 
         self.chunk_samples = int(sample_rate * chunk_duration)
+
+        # --- ゲイン ---
+        self.input_gain = input_gain
+        self.auto_gain = auto_gain
+        self._auto_gain_target = auto_gain_target
+        self._current_gain = input_gain  # オートゲイン時の動的ゲイン値
+        self._gain_smoothing = 0.05      # ゲイン変化の平滑化係数（小さいほど緩やか）
+        self._gain_max = 20.0            # オートゲインの最大倍率
+        self._gain_min = 1.0             # オートゲインの最小倍率
+        self._noise_floor = 0.002        # これ以下の RMS はノイズとみなしゲイン更新しない
+
+        if input_gain != 1.0 or auto_gain:
+            gain_info = f"gain={input_gain:.1f}x"
+            if auto_gain:
+                gain_info += f", auto_gain=ON (target_rms={auto_gain_target})"
+            print(f"[AudioCapture] {gain_info}")
 
         # レベルコールバック (rms: float, is_active: bool)
         self.on_level = None
@@ -112,6 +132,33 @@ class AudioCapture:
                 return i
         return None
 
+    # ===== ゲイン処理 =====
+
+    def _apply_gain(self, audio_data: np.ndarray) -> np.ndarray:
+        """入力音声にゲインを適用する。
+
+        手動ゲイン: 固定倍率で増幅
+        オートゲイン: 直近の RMS に基づきゲインを動的に調整し、
+                      ターゲット RMS に近づける（AGC）
+        """
+        if self.auto_gain:
+            rms = np.sqrt(np.mean(audio_data**2))
+            if rms > self._noise_floor:
+                # ターゲット RMS に到達するための理想ゲインを計算
+                desired_gain = self._auto_gain_target / rms
+                desired_gain = np.clip(desired_gain, self._gain_min, self._gain_max)
+                # 急激な変化を避けるため指数移動平均で平滑化
+                self._current_gain += self._gain_smoothing * (desired_gain - self._current_gain)
+                self._current_gain = np.clip(self._current_gain, self._gain_min, self._gain_max)
+            # ゲイン適用（ノイズフロア以下でも現在のゲインで増幅）
+            audio_data = audio_data * self._current_gain
+        elif self.input_gain != 1.0:
+            audio_data = audio_data * self.input_gain
+
+        # クリッピング防止: -1.0 〜 1.0 に収める
+        np.clip(audio_data, -1.0, 1.0, out=audio_data)
+        return audio_data
+
     # ===== コールバック =====
 
     def _audio_callback(self, indata, frames, time_info, status):
@@ -120,6 +167,9 @@ class AudioCapture:
             print(f"[AudioCapture] Status: {status}")
 
         audio_data = indata[:, 0].copy()  # モノラルに変換
+
+        # ゲイン適用（RMS/VAD 判定の前に増幅する）
+        audio_data = self._apply_gain(audio_data)
 
         # 生オーディオを外部に通知（ストリーミング ASR 用）
         if self.on_audio:
@@ -224,6 +274,10 @@ class AudioCapture:
         self._running = True
         self._buffer = []
         self._buffer_samples = 0
+
+        # オートゲイン状態をリセット
+        if self.auto_gain:
+            self._current_gain = self.input_gain
 
         # VAD 状態をリセット
         if self.use_vad:
