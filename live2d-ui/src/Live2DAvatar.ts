@@ -66,6 +66,9 @@ export class Live2DAvatar {
   // 口の平滑化
   private smoothedMouth = 0;
 
+  // window の resize リスナー参照（destroy() で確実に解除するため保持）
+  private onResize: (() => void) | null = null;
+
   constructor(private opts: Live2DAvatarOptions) {
     this.mouthParamId = opts.mouthParamId ?? "ParamMouthOpenY";
     this.lipSyncGain = opts.lipSyncGain ?? 1.6;
@@ -192,8 +195,9 @@ export class Live2DAvatar {
     applyLayout();
 
     // リサイズ対応（ウィンドウサイズ変更時も再配置）
-    const onResize = () => applyLayout();
-    window.addEventListener("resize", onResize);
+    // ハンドラをフィールドに保持し、destroy() で確実に removeEventListener できるようにする。
+    this.onResize = () => applyLayout();
+    window.addEventListener("resize", this.onResize);
 
     // 毎フレーム処理: 感情補間 + 口パク + アイドル補助
     this.app.ticker.add(this._tick);
@@ -299,6 +303,10 @@ export class Live2DAvatar {
     this._stopAudio();
     this.audioCtx?.close().catch(() => {});
     this.app.ticker.remove(this._tick);
+    if (this.onResize) {
+      window.removeEventListener("resize", this.onResize);
+      this.onResize = null;
+    }
     if (this.model) {
       this.app.stage.removeChild(this.model);
       this.model.destroy({ children: true });

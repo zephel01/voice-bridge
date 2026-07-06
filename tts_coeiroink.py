@@ -10,6 +10,7 @@ CoeiroInk TTS モジュール
 import json
 import os
 import tempfile
+from urllib.parse import urlparse
 
 import requests
 
@@ -33,9 +34,17 @@ class CoeiroinkTTS:
         import os
         if host is None:
             host = os.environ.get("COEIROINK_HOST", "http://localhost:50031")
+
+        parsed = urlparse(host)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"host のURLスキームは http/https のみ許可されています: {host!r}"
+            )
+
         self.speaker_id = speaker_id
         self.speaker_uuid = speaker_uuid or "cb11bdbd-78fc-4f16-b528-a400bae1782d"  # デフォルト: リリンちゃん
         self.host = host
+        self.session = requests.Session()
         self._temp_dir = tempfile.mkdtemp(prefix="voice_bridge_ci_")
         self._counter = 0
 
@@ -129,7 +138,7 @@ class CoeiroinkTTS:
             }
 
             print(f"[CoeiroinkTTS] リクエスト: uuid={self.speaker_uuid}, styleId={self.speaker_id}")
-            resp = requests.post(
+            resp = self.session.post(
                 f"{self.host}/v1/synthesis",
                 json=payload,
                 headers={"Accept": "audio/wav"},
@@ -164,6 +173,7 @@ class CoeiroinkTTS:
         if os.path.exists(self._temp_dir):
             shutil.rmtree(self._temp_dir, ignore_errors=True)
             print(f"[CoeiroinkTTS] 一時ファイルを削除: {self._temp_dir}")
+        self.session.close()
 
 
 if __name__ == "__main__":

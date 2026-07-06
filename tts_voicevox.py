@@ -9,6 +9,7 @@ VOICEVOX TTS モジュール
 import json
 import os
 import tempfile
+from urllib.parse import urlparse
 
 import requests
 
@@ -52,8 +53,15 @@ class VoicevoxTTS:
             speaker_id: 話者ID（デフォルト: 3 = ずんだもん ノーマル）
             host: VOICEVOX エンジンの URL
         """
+        parsed = urlparse(host)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"host のURLスキームは http/https のみ許可されています: {host!r}"
+            )
+
         self.speaker_id = speaker_id
         self.host = host
+        self.session = requests.Session()
         self._temp_dir = tempfile.mkdtemp(prefix="voice_bridge_vv_")
         self._counter = 0
 
@@ -117,7 +125,7 @@ class VoicevoxTTS:
 
         try:
             # 1. audio_query: 読み上げクエリを作成
-            resp = requests.post(
+            resp = self.session.post(
                 f"{self.host}/audio_query",
                 params={"text": text.strip(), "speaker": self.speaker_id},
                 timeout=10,
@@ -126,7 +134,7 @@ class VoicevoxTTS:
             query = resp.json()
 
             # 2. synthesis: 音声合成
-            resp = requests.post(
+            resp = self.session.post(
                 f"{self.host}/synthesis",
                 params={"speaker": self.speaker_id},
                 json=query,
@@ -155,6 +163,7 @@ class VoicevoxTTS:
         if os.path.exists(self._temp_dir):
             shutil.rmtree(self._temp_dir, ignore_errors=True)
             print(f"[VoicevoxTTS] 一時ファイルを削除: {self._temp_dir}")
+        self.session.close()
 
 
 if __name__ == "__main__":

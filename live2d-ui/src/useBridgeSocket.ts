@@ -28,9 +28,67 @@ export interface BridgeSocketHandle {
   send: (payload: unknown) => void;
 }
 
+const KNOWN_MESSAGE_TYPES = new Set(["tts", "emotion", "idle"]);
+
+const INITIAL_RECONNECT_DELAY_MS = 1500;
+const MAX_RECONNECT_DELAY_MS = 30000;
+const RECONNECT_BACKOFF_FACTOR = 2;
+
+/**
+ * 受信した JSON をランタイムで検証し、BridgeMessage として扱って良いかを判定する。
+ * 想定外の type や必須フィールドの型不一致がある場合は null を返す。
+ */
+function validateBridgeMessage(data: unknown): BridgeMessage | null {
+  if (typeof data !== "object" || data === null) {
+    return null;
+  }
+
+  const obj = data as Record<string, unknown>;
+  const { type } = obj;
+
+  if (typeof type !== "string" || !KNOWN_MESSAGE_TYPES.has(type)) {
+    return null;
+  }
+
+  if (type === "tts") {
+    if (typeof obj.audio_b64 !== "string") {
+      return null;
+    }
+    if (typeof obj.id !== "string") {
+      return null;
+    }
+    return {
+      type: "tts",
+      id: obj.id,
+      audio_b64: obj.audio_b64,
+      mime: typeof obj.mime === "string" ? obj.mime : "",
+      text: typeof obj.text === "string" ? obj.text : "",
+      emotion: typeof obj.emotion === "string" ? obj.emotion : "",
+      intensity: typeof obj.intensity === "number" ? obj.intensity : 1.0,
+    };
+  }
+
+  if (type === "emotion") {
+    if (typeof obj.emotion !== "string") {
+      return null;
+    }
+    return {
+      type: "emotion",
+      emotion: obj.emotion,
+      intensity: typeof obj.intensity === "number" ? obj.intensity : 1.0,
+    };
+  }
+
+  // type === "idle"
+  if (typeof obj.enabled !== "boolean") {
+    return null;
+  }
+  return { type: "idle", enabled: obj.enabled };
+}
+
 /**
  * Python 側 live2d_bridge.py の WebSocket に接続し、
- * 再接続やハートビートを管理するフック。
+ * 再接続（指数バックオフ）やハートビートを管理するフック。
  */
 export function useBridgeSocket(
   url: string,
@@ -44,6 +102,7 @@ export function useBridgeSocket(
   useEffect(() => {
     let stopped = false;
     let retryTimer: number | null = null;
+    let reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
 
     const connect = () => {
       if (stopped) return;
@@ -52,23 +111,39 @@ export function useBridgeSocket(
 
       ws.addEventListener("open", () => {
         setConnected(true);
+        // 接続成功したのでバックオフをリセット
+        reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
         ws.send(JSON.stringify({ type: "ready" }));
       });
 
       ws.addEventListener("message", (ev) => {
+        let parsed: unknown;
         try {
-          const msg = JSON.parse(ev.data) as BridgeMessage;
-          onMessageRef.current(msg);
+          parsed = JSON.parse(ev.data);
         } catch (e) {
           console.warn("[bridge] parse error", e);
+          return;
         }
+
+        const msg = validateBridgeMessage(parsed);
+        if (!msg) {
+          console.warn("[bridge] received message failed validation, ignoring", parsed);
+          return;
+        }
+
+        onMessageRef.current(msg);
       });
 
       const scheduleReconnect = () => {
         setConnected(false);
         wsRef.current = null;
         if (stopped) return;
-        retryTimer = window.setTimeout(connect, 1500);
+        const delay = reconnectDelayMs;
+        reconnectDelayMs = Math.min(
+          reconnectDelayMs * RECONNECT_BACKOFF_FACTOR,
+          MAX_RECONNECT_DELAY_MS,
+        );
+        retryTimer = window.setTimeout(connect, delay);
       };
 
       ws.addEventListener("close", scheduleReconnect);

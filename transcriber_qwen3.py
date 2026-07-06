@@ -109,9 +109,23 @@ class Transcriber:
         self.device = device
         self.compute_type = compute_type
         self._model = None
-        self._model_name = self.MODEL_SIZE_MAP.get(
-            model_size.lower(), "Qwen/Qwen3-ASR-0.6B"
+        self._model_name = self._validate_model_name(
+            self.MODEL_SIZE_MAP.get(model_size.lower(), "Qwen/Qwen3-ASR-0.6B")
         )
+
+    def _validate_model_name(self, name: str) -> str:
+        """モデル名を MODEL_SIZE_MAP の許可された値のみに制限するホワイトリスト検証
+
+        from_pretrained() に渡す前に必ずこの検証を通すこと。
+        許可外のモデル名が渡された場合は ValueError を送出する。
+        """
+        allowed_model_names = set(self.MODEL_SIZE_MAP.values())
+        if name not in allowed_model_names:
+            raise ValueError(
+                f"許可されていないモデル名です: {name!r} "
+                f"(許可されているモデル: {sorted(allowed_model_names)})"
+            )
+        return name
 
     def _get_torch_dtype(self):
         """compute_type から torch.dtype を決定"""
@@ -140,6 +154,9 @@ class Transcriber:
             return
 
         import torch
+
+        # from_pretrained を呼ぶ前に必ずホワイトリスト検証する
+        self._model_name = self._validate_model_name(self._model_name)
 
         dtype = self._get_torch_dtype()
         device_map = self._get_device_map()
@@ -291,8 +308,8 @@ class Transcriber:
 
     def change_model(self, model_size: str):
         """モデルサイズ変更"""
-        new_model_name = self.MODEL_SIZE_MAP.get(
-            model_size.lower(), self._model_name
+        new_model_name = self._validate_model_name(
+            self.MODEL_SIZE_MAP.get(model_size.lower(), self._model_name)
         )
         if new_model_name != self._model_name:
             self.model_size = model_size

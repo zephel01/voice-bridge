@@ -14,11 +14,13 @@
     python analyze_and_update_filters.py --apply    # フィルターに自動追加
 """
 
+import ast
 import os
 import sys
 import re
 import json
 import argparse
+import shutil
 from pathlib import Path
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -267,9 +269,41 @@ class FilterUpdater:
     def _apply_filters_to_file(self, english_patterns: List[str], japanese_patterns: List[str]):
         """
         実際に translator.py を修正
+
+        冪等性: 追加しようとしているパターンが既にファイル内に存在する場合は
+        重複追加を避けるためスキップする。
+        安全性: 書き込み前に .bak バックアップを作成し、書き込み後に
+        ast.parse() で構文検証を行う。検証に失敗した場合はバックアップから
+        ロールバックする（成功時のみ確定）。
         """
         with open(self.translator_path, "r", encoding="utf-8") as f:
+            original_content = f.read()
+
+        with open(self.translator_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
+
+        # 冪等性チェック: 既存内容に含まれているパターンは追加候補から除外
+        def _not_already_present(pattern: str) -> bool:
+            return pattern not in original_content
+
+        filtered_english_patterns = [
+            p for p in english_patterns if _not_already_present(p)
+        ]
+        filtered_japanese_patterns = [
+            p for p in japanese_patterns if _not_already_present(p)
+        ]
+
+        skipped_english = len(english_patterns) - len(filtered_english_patterns)
+        skipped_japanese = len(japanese_patterns) - len(filtered_japanese_patterns)
+        if skipped_english or skipped_japanese:
+            print(
+                f"ℹ️  既に存在するため追加をスキップしたパターン: "
+                f"英語 {skipped_english}個 / 日本語 {skipped_japanese}個"
+            )
+
+        if not filtered_english_patterns and not filtered_japanese_patterns:
+            print("📝 追加するパターンはすべて既存のため、更新は行いません")
+            return
 
         # WHISPER_MISTRANSLATIONS と MISTRANSLATION_PATTERNS のセクションを見つけて追加
         new_lines = []
@@ -285,8 +319,8 @@ class FilterUpdater:
                 new_lines.append(line)
             elif in_whisper_section and line.strip() == "}":
                 # 英語パターンを追加
-                if english_patterns and not whisper_updated:
-                    for pattern in english_patterns[:3]:  # 最大3つまで
+                if filtered_english_patterns and not whisper_updated:
+                    for pattern in filtered_english_patterns[:3]:  # 最大3つまで
                         new_lines.append(f"        {pattern}: True,\n")
                     whisper_updated = True
                 in_whisper_section = False
@@ -298,8 +332,8 @@ class FilterUpdater:
                 new_lines.append(line)
             elif in_ja_section and line.strip() == "}":
                 # 日本語パターンを追加
-                if japanese_patterns and not ja_updated:
-                    for pattern in japanese_patterns[:3]:  # 最大3つまで
+                if filtered_japanese_patterns and not ja_updated:
+                    for pattern in filtered_japanese_patterns[:3]:  # 最大3つまで
                         new_lines.append(f"        {pattern},\n")
                     ja_updated = True
                 in_ja_section = False
@@ -308,15 +342,44 @@ class FilterUpdater:
             else:
                 new_lines.append(line)
 
+        # 書き込み前に .bak バックアップを作成（同じディレクトリに配置）
+        # 注: このメソッドはロジックとして実装するのみで、本タスクの中では
+        # 実際に呼び出し・実行しない。
+        backup_path = self.translator_path.with_suffix(
+            self.translator_path.suffix + ".bak"
+        )
+        try:
+            shutil.copy2(self.translator_path, backup_path)
+        except Exception as e:
+            print(f"❌ バックアップ作成に失敗したため更新を中止します: {e}")
+            return
+
         # ファイルを上書き
         try:
             with open(self.translator_path, "w", encoding="utf-8") as f:
                 f.writelines(new_lines)
+
+            # 書き込み後に構文検証。失敗したらバックアップからロールバック。
+            with open(self.translator_path, "r", encoding="utf-8") as f:
+                written_content = f.read()
+
+            try:
+                ast.parse(written_content)
+            except SyntaxError as e:
+                print(f"❌ 構文検証に失敗したためロールバックします: {e}")
+                shutil.copy2(backup_path, self.translator_path)
+                return
+
             print(f"✅ {self.translator_path} を更新しました")
-            print(f"   - 英語パターン: {len(english_patterns)}個追加")
-            print(f"   - 日本語パターン: {len(japanese_patterns)}個追加")
+            print(f"   - 英語パターン: {len(filtered_english_patterns)}個追加")
+            print(f"   - 日本語パターン: {len(filtered_japanese_patterns)}個追加")
         except Exception as e:
             print(f"❌ 更新に失敗しました: {e}")
+            # 書き込み自体が失敗した場合もバックアップから復元を試みる
+            try:
+                shutil.copy2(backup_path, self.translator_path)
+            except Exception:
+                pass
 
 
 def main():

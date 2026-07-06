@@ -42,7 +42,21 @@ def load_dotenv(env_path: str = ".env"):
                 continue
             key, _, value = line.partition("=")
             key = key.strip()
-            value = value.strip().strip("'\"")
+            value = value.strip()
+
+            # 引用符除去: 先頭と末尾が同じ引用符文字で対になっている場合のみ剥がす
+            if (
+                len(value) >= 2
+                and value[0] == value[-1]
+                and value[0] in ("'", '"')
+            ):
+                value = value[1:-1]
+            else:
+                # 引用符で囲まれていない値のみ、インラインコメント（半角スペース+#以降）を除去
+                comment_idx = value.find(" #")
+                if comment_idx != -1:
+                    value = value[:comment_idx].rstrip()
+
             if key and key not in os.environ:
                 os.environ[key] = value
 

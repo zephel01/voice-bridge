@@ -16,29 +16,64 @@ const STORAGE_KEY = "live2d_selected_model";
 // Python ブリッジの待受アドレス
 const BRIDGE_URL = "ws://127.0.0.1:8765";
 
+// 許可する音声 MIME タイプ。これ以外は audio/mpeg にフォールバックする。
+const ALLOWED_AUDIO_MIME_TYPES = new Set(["audio/mpeg", "audio/wav", "audio/ogg"]);
+const FALLBACK_AUDIO_MIME_TYPE = "audio/mpeg";
+
+/**
+ * モデルパスとして許可する値かを検証する。
+ * "/live2d/" で始まる相対パスのみを許可し、それ以外（絶対 URL、file://、
+ * 上位ディレクトリへのパストラバーサル等）は拒否する。
+ */
+function isAllowedModelPath(candidate: string): boolean {
+  if (!candidate.startsWith("/live2d/")) return false;
+  // "//" によるプロトコル相対 URL や ".." によるパストラバーサルを拒否
+  if (candidate.startsWith("//")) return false;
+  if (candidate.includes("..")) return false;
+  return true;
+}
+
 /** 現在のモデル URL を解決する（URLクエリ > localStorage > デフォルト） */
 function resolveModelUrl(): string {
   const fromQuery = new URLSearchParams(window.location.search).get("model");
-  if (fromQuery) return fromQuery;
+  if (fromQuery && isAllowedModelPath(fromQuery)) return fromQuery;
+  if (fromQuery) {
+    console.warn("[App] ignoring disallowed model query value:", fromQuery);
+  }
+
   const fromStorage = localStorage.getItem(STORAGE_KEY);
-  if (fromStorage) return fromStorage;
+  if (fromStorage && isAllowedModelPath(fromStorage)) return fromStorage;
+  if (fromStorage) {
+    console.warn("[App] ignoring disallowed stored model value:", fromStorage);
+  }
+
   return DEFAULT_MODEL_URL;
 }
 
 /** モデルを切り替える（localStorage 保存 + URL を書き換えてリロード） */
 function switchModel(model: ModelEntry): void {
+  if (!isAllowedModelPath(model.path)) {
+    console.warn("[App] refusing to switch to disallowed model path:", model.path);
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, model.path);
   const url = new URL(window.location.href);
   url.searchParams.set("model", model.path);
   window.location.href = url.toString();
 }
 
-function base64ToBlobUrl(b64: string, mime: string): string {
-  const binStr = atob(b64);
-  const len = binStr.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) bytes[i] = binStr.charCodeAt(i);
-  return URL.createObjectURL(new Blob([bytes], { type: mime }));
+function base64ToBlobUrl(b64: string, mime: string): string | null {
+  try {
+    const safeMime = ALLOWED_AUDIO_MIME_TYPES.has(mime) ? mime : FALLBACK_AUDIO_MIME_TYPE;
+    const binStr = atob(b64);
+    const len = binStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binStr.charCodeAt(i);
+    return URL.createObjectURL(new Blob([bytes], { type: safeMime }));
+  } catch (e) {
+    console.warn("[App] failed to decode audio_b64", e);
+    return null;
+  }
 }
 
 export default function App() {
@@ -80,6 +115,16 @@ export default function App() {
     setSubtitle(next.text || "");
 
     const url = base64ToBlobUrl(next.audio_b64, next.mime || "audio/mpeg");
+    if (!url) {
+      // デコードに失敗した場合はこのメッセージをスキップして次へ進む
+      processingRef.current = false;
+      setSpeaking(false);
+      setSubtitle("");
+      sendRef.current({ type: "playback_end", id: next.id });
+      processQueue();
+      return;
+    }
+
     avatar.playAudio(url, () => {
       URL.revokeObjectURL(url);
       setSpeaking(false);
