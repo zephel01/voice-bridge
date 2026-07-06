@@ -56,6 +56,11 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger("voice_bridge.live2d")
 
 
+# サーバをローカル以外にバインドした場合、会話音声が同一LAN上の
+# 他端末から到達可能になり得るため警告対象とするホスト名の集合
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
 @dataclass
 class _PendingPlayback:
     """再生終了を待つためのフラグ保持構造体"""
@@ -96,6 +101,12 @@ class Live2DBridge:
         """サーバを別スレッドで起動する。"""
         if self._server_thread is not None:
             return
+
+        if self.host not in _LOCAL_HOSTS:
+            logger.warning(
+                f"[Live2DBridge] host={self.host!r} はローカルホスト以外です。"
+                "会話音声がLANに露出する可能性があります。"
+            )
 
         self._server_thread = threading.Thread(
             target=self._run_server, name="Live2DBridgeServer", daemon=True
@@ -161,7 +172,7 @@ class Live2DBridge:
                 self._handle_client,
                 self.host,
                 self.port,
-                max_size=8 * 1024 * 1024,  # 最大 8MB メッセージ許容
+                max_size=1 * 1024 * 1024,  # 最大 1MB メッセージ許容
                 ping_interval=20,
                 ping_timeout=20,
             ):
