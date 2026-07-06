@@ -95,6 +95,8 @@ class VoiceBridge:
         ai_api_key: str = None,
         ai_model: str = "gpt-4o-mini",
         use_vad: bool = False,
+        input_gain: float = 1.0,
+        auto_gain: bool = False,
         live2d_enabled: bool = False,
         live2d_host: str = "127.0.0.1",
         live2d_port: int = 8765,
@@ -115,6 +117,8 @@ class VoiceBridge:
         self.capture = AudioCapture(
             device_name=device_name,
             chunk_duration=chunk_duration,
+            input_gain=input_gain,
+            auto_gain=auto_gain,
             use_vad=enable_vad,
         )
         if enable_vad:
@@ -1134,6 +1138,8 @@ def run_cli(args):
         ai_base_url=args.ai_base_url,
         ai_model=args.ai_model,
         use_vad=args.vad,
+        input_gain=args.gain,
+        auto_gain=args.auto_gain,
         live2d_enabled=args.live2d,
         live2d_host=args.live2d_host,
         live2d_port=args.live2d_port,
@@ -1271,6 +1277,8 @@ def run_gui(args):
             ai_base_url=args.ai_base_url,
             ai_model=settings.get("ai_model") or args.ai_model,
             use_vad=vad,
+            input_gain=settings.get("input_gain", 1.0),
+            auto_gain=settings.get("auto_gain", False),
             live2d_enabled=args.live2d,
             live2d_host=args.live2d_host,
             live2d_port=args.live2d_port,
@@ -1437,6 +1445,10 @@ def main():
     parser.add_argument("--coeiroink-speaker-id", type=int, default=0,
                         help="CoeiroInk speaker ID (default: 0 = リリンちゃん)")
     parser.add_argument("--chunk", type=float, default=4.0, help="音声チャンク長（秒）")
+    parser.add_argument("--gain", type=float, default=1.0,
+                        help="入力ゲイン倍率 (1.0=変更なし, 2.0=2倍増幅)")
+    parser.add_argument("--auto-gain", action="store_true",
+                        help="オートゲイン（自動音量正規化）を有効化。音量が小さい動画でも自動で増幅")
 
     # VAD (Voice Activity Detection)
     parser.add_argument("--vad", action="store_true",

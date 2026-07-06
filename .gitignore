@@ -49,6 +49,7 @@ logs/
 .claude/
 .crush/
 .serena/
+_OUTPUTS/
 
 # 内部ドキュメント（公開不要）
 docs/internal/

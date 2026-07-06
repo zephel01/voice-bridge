@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice-bridge"
+version = "0.1.0"
+description = "リアルタイム音声翻訳 & AI 音声チャット"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    { name = "zephel01" },
+]
+keywords = ["voice", "translation", "real-time", "tts", "asr", "live2d"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+dependencies = [
+    "faster-whisper",
+    "deep-translator",
+    "edge-tts",
+    "pygame",
+    "numpy",
+    "requests",
+    "torch",
+    "sounddevice; sys_platform != 'win32'",
+    "PyAudioWPatch; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+vad = [
+    "silero-vad",
+]
+live2d = [
+    "websockets",
+]
+moonshine = [
+    "moonshine-voice",
+]
+qwen3 = [
+    "qwen-asr",
+]
+benchmark = [
+    "psutil",
+]
+all = [
+    "voice-bridge[vad,live2d,moonshine,qwen3,benchmark]",
+]
+
+[project.scripts]
+voice-bridge = "main:main"
+
+[project.urls]
+Homepage = "https://github.com/zephel01/voice-bridge"
+Repository = "https://github.com/zephel01/voice-bridge"
+Issues = "https://github.com/zephel01/voice-bridge/issues"
+
+[tool.setuptools]
+py-modules = [
+    "main",
+    "audio_capture",
+    "audio_capture_win",
+    "vad",
+    "transcriber",
+    "transcriber_base",
+    "transcriber_moonshine",
+    "transcriber_qwen3",
+    "translator",
+    "tts_engine",
+    "tts_voicevox",
+    "tts_coeiroink",
+    "tts_base",
+    "player",
+    "translation_logger",
+    "ai_chat",
+    "latency_tracker",
+    "live2d_bridge",
+    "gui",
+]
+packages = ["config"]

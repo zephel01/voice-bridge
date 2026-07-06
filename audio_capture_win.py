@@ -27,6 +27,10 @@ class WindowsAudioCapture:
         sample_rate: int = 16000,
         chunk_duration: float = 4.0,
         silence_threshold: float = 0.01,
+        # --- ゲイン設定 ---
+        input_gain: float = 1.0,        # 入力ゲイン倍率（1.0 = 変更なし）
+        auto_gain: bool = False,         # オートゲイン（自動音量正規化）
+        auto_gain_target: float = 0.08,  # オートゲインのターゲット RMS
         use_vad: bool = False,
         **kwargs,  # vad_threshold 等の追加パラメータを無視
     ):
@@ -46,6 +50,22 @@ class WindowsAudioCapture:
         self._thread = None
 
         self.chunk_samples = int(sample_rate * chunk_duration)
+
+        # --- ゲイン ---
+        self.input_gain = input_gain
+        self.auto_gain = auto_gain
+        self._auto_gain_target = auto_gain_target
+        self._current_gain = input_gain
+        self._gain_smoothing = 0.05
+        self._gain_max = 20.0
+        self._gain_min = 1.0
+        self._noise_floor = 0.002
+
+        if input_gain != 1.0 or auto_gain:
+            gain_info = f"gain={input_gain:.1f}x"
+            if auto_gain:
+                gain_info += f", auto_gain=ON (target_rms={auto_gain_target})"
+            print(f"[WindowsAudioCapture] {gain_info}")
 
         # RMS レベルコールバック (rms: float, is_above_threshold: bool)
         self.on_level = None
@@ -105,6 +125,21 @@ class WindowsAudioCapture:
         except Exception:
             return None
 
+    def _apply_gain(self, audio_data: np.ndarray) -> np.ndarray:
+        """入力音声にゲインを適用する"""
+        if self.auto_gain:
+            rms = np.sqrt(np.mean(audio_data**2))
+            if rms > self._noise_floor:
+                desired_gain = self._auto_gain_target / rms
+                desired_gain = np.clip(desired_gain, self._gain_min, self._gain_max)
+                self._current_gain += self._gain_smoothing * (desired_gain - self._current_gain)
+                self._current_gain = np.clip(self._current_gain, self._gain_min, self._gain_max)
+            audio_data = audio_data * self._current_gain
+        elif self.input_gain != 1.0:
+            audio_data = audio_data * self.input_gain
+        np.clip(audio_data, -1.0, 1.0, out=audio_data)
+        return audio_data
+
     def _capture_thread(self):
         """録音スレッド"""
         device = self._find_loopback_device()
@@ -160,6 +195,9 @@ class WindowsAudioCapture:
                 indices = np.linspace(0, len(audio_data) - 1, new_length).astype(int)
                 audio_data = audio_data[indices]
 
+            # ゲイン適用
+            audio_data = self._apply_gain(audio_data)
+
             # バッファに追加
             self._buffer.append(audio_data)
             self._buffer_samples += len(audio_data)
@@ -192,6 +230,10 @@ class WindowsAudioCapture:
         self._running = True
         self._buffer = []
         self._buffer_samples = 0
+
+        # オートゲイン状態をリセット
+        if self.auto_gain:
+            self._current_gain = self.input_gain
 
         self._pa = pyaudio.PyAudio()
         self._thread = threading.Thread(target=self._capture_thread, daemon=True)

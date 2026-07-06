@@ -34,10 +34,11 @@ Voice Bridge は **2つのモード** を持つリアルタイム音声処理ア
 - **AI 音声チャット** — Ollama / LM Studio などのローカル LLM に対応
 - **複数の TTS エンジン** — CoeiroInk（リリンちゃん）、VOICEVOX（ずんだもん等）、Edge TTS
 - **🎭 Live2D アバター連携** — Electron + pixi-live2d-display で Cubism 4/5 モデルを表示し、TTS に合わせて口パク・まばたき・感情表現
+- **入力ゲイン / オートゲイン** — 音量の小さい動画でも自動増幅して検出（AGC）
 - **Silero VAD** による自然な発話検出
 - **低遅延応答** — LLM ストリーミング + TTS ダブルバッファリング
 - **Qwen3-ASR 対応** — 52言語対応、本アプリでは7言語 + 自動言語検出
-- **GUI でリアルタイム切り替え** — モード・ASR エンジン・LLM モデル・チャンク長
+- **GUI でリアルタイム切り替え** — モード・ASR エンジン・LLM モデル・チャンク長・入力ゲイン
 - **パイプラインレイテンシ** のリアルタイム計測・表示
 
 ---
@@ -146,6 +147,12 @@ python main.py --source-lang auto
 
 # Qwen3-ASR で起動
 python main.py --asr qwen3
+
+# 音量が小さい動画向け（オートゲインで自動増幅）
+python main.py --auto-gain
+
+# 手動で3倍に増幅
+python main.py --gain 3.0
 
 # Live2D アバター連携（別ターミナルで Electron UI を起動しておく）
 python main.py --mode chat --vad --live2d
